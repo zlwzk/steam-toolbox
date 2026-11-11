@@ -24,7 +24,9 @@ def get_settings():
 @router.put("")
 def update_settings(payload: SettingsPayload):
     database.update_settings(payload.data)
-    return {"ok": True, "settings": database.get_settings()}
+    s = database.get_settings()
+    s.pop("api_key", None)  # 与 GET 保持一致：API Key 不下发到前端
+    return {"ok": True, "settings": s}
 
 
 @router.get("/scheduler-status")

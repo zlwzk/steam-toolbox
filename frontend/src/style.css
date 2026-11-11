@@ -275,3 +275,98 @@ header .header-right { margin-left: auto; display: flex; align-items: center; }
 .log-info { color: var(--primary); }
 .log-warn { color: var(--warn); }
 .log-err { color: #dc2626; }
+
+/* 启动未绑定引导条 */
+.guide-bar {
+  background: #fffbeb;
+  border: 1px solid #f3d9a4;
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+}
+
+.guide-title { font-weight: 700; font-size: 15px; margin-bottom: 8px; color: var(--warn); }
+
+.guide-steps { margin: 0 0 14px; padding-left: 20px; line-height: 1.9; font-size: 13px; }
+
+/* 导航未完成红点 */
+nav button.pending { color: var(--warn); }
+
+.nav-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warn);
+  margin-left: 5px;
+}
+
+/* 更新提示 */
+.update-link {
+  font-size: 13px;
+  color: var(--ok);
+  background: #e7f6ec;
+  border: 1px solid #b7e4c6;
+  border-radius: 999px;
+  padding: 5px 12px;
+  text-decoration: none;
+}
+
+.update-link:hover { text-decoration: underline; }
+
+.build-tag { color: var(--muted); }
+
+/* 账号绑定分步状态条 */
+.steps {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin: 10px 0 18px;
+  padding: 14px 16px;
+  background: #fafbfc;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.step { display: flex; gap: 10px; align-items: center; }
+
+.step-dot {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #eef2f7;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  flex: none;
+}
+
+.step.done .step-dot { background: #e7f6ec; color: var(--ok); }
+
+.step-name { font-size: 13px; font-weight: 600; }
+
+.step-sub { font-size: 12px; color: var(--muted); }
+
+/* 关于弹窗 */
+.ver-badge { cursor: pointer; }
+
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: #fff;
+  border-radius: 14px;
+  padding: 22px 24px;
+  width: 340px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}

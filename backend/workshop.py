@@ -208,6 +208,9 @@ def start_task(appid: str, mode: str = "subscribe", auto: bool = False,
         return {"ok": False, "error": "工坊任务正在进行中"}
     if not appid or not str(appid).isdigit():
         return {"ok": False, "error": "请填写有效的游戏 AppID"}
+    s = database.get_settings()
+    if not (s.get("api_key") and s.get("steamid")):
+        return {"ok": False, "error": "请先在「账号绑定」填入 API Key 与 SteamID，并在弹出浏览器完成 Steam 登录"}
     ws_progress.update({
         "state": "running", "mode": mode, "auto": auto, "total": 0, "current": 0,
         "message": "正在启动浏览器…", "current_item": None,

@@ -22,6 +22,8 @@ function qs(params) {
 
 export const api = {
   version: () => req('/version'),
+  sessionStatus: () => req('/session/status'),
+  updateCheck: () => req('/update/check'),
   getAccount: () => req('/account'),
   saveAccount: (data) => req('/account', { method: 'POST', body: JSON.stringify(data) }),
   testAccount: (data) => req('/account/test', { method: 'POST', body: JSON.stringify(data) }),

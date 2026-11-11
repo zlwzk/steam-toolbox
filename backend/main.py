@@ -12,8 +12,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from . import config, database, logstore, scheduler
-from .routers import account, candidates, claim, cleaner, freegames, scan, settings, workshop
+from . import config, database, logstore, scheduler, updater
+from .routers import account, candidates, claim, cleaner, freegames, scan, session, settings, workshop
 
 app = FastAPI(title=config.APP_NAME, version=config.APP_VERSION)
 
@@ -57,7 +57,12 @@ def health():
 
 @app.get("/api/version")
 def version():
-    return {"name": config.APP_NAME, "version": config.APP_VERSION}
+    return {"name": config.APP_NAME, "version": config.APP_VERSION, "build": config.BUILD_NUMBER}
+
+
+@app.get("/api/update/check")
+def update_check():
+    return updater.check()
 
 
 @app.get("/api/logs")
@@ -72,6 +77,7 @@ def clear_logs():
 
 
 app.include_router(account.router)
+app.include_router(session.router)
 app.include_router(scan.router)
 app.include_router(candidates.router)
 app.include_router(freegames.router)
