@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 运行时数据（含本机账号配置，勿提交）
+data/
+
+# 凭据 / 数据库 / 浏览器登录态 / 截图兜底（即使不在 data/ 下也排除）
+.env
+.env.*
+*.db
+*.sqlite
+*.sqlite3
+browser_profile/
+screenshots/
+*.log
+
+# Node
+node_modules/
+frontend/dist/
+
+# PyInstaller 打包产物与中间文件
+build/
+packaged/
+
+# 编辑器
+.vscode/
+.idea/
