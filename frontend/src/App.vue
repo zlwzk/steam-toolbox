@@ -35,7 +35,7 @@ const comps = {
   settings: SettingsView,
 }
 const active = ref(localStorage.getItem('steam_dlc_tab') || 'dashboard')
-const version = ref('1.0.0')
+const version = ref('1.1.0')
 
 function setTab(key) {
   active.value = key
