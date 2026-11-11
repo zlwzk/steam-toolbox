@@ -1,0 +1,267 @@
+/* panel.css — Steam 原生深色风格 */
+#wbs-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  width: 340px;
+  max-height: 82vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  background: linear-gradient(to bottom, #1f3145 0%, #1b2838 100%);
+  border: 1px solid #2a475e;
+  border-radius: 4px;
+  color: #c7d5e0;
+  font-family: "Motiva Sans", "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+}
+
+#wbs-panel * { box-sizing: border-box; }
+
+/* 折叠模式：只保留标题栏 */
+#wbs-panel.wbs-collapsed .wbs-body,
+#wbs-panel.wbs-collapsed .wbs-footer { display: none; }
+#wbs-panel.wbs-collapsed { width: 220px; }
+
+.wbs-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border-bottom: 1px solid #2a475e;
+  border-radius: 4px 4px 0 0;
+  cursor: move;
+  user-select: none;
+}
+
+/* header 内的按钮保持指针光标，不被 move 覆盖 */
+.wbs-header button,
+.wbs-header a {
+  cursor: pointer;
+  user-select: auto;
+}
+
+.wbs-header .wbs-title {
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  flex: 1;
+}
+
+.wbs-ver {
+  font-size: 10px;
+  color: #55606a;
+  margin-right: 2px;
+}
+
+.wbs-badge-mode {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 2px;
+  background: rgba(102, 192, 244, 0.15);
+  color: #66c0f4;
+  border: 1px solid rgba(102, 192, 244, 0.35);
+}
+
+.wbs-badge-mode.wbs-mode-unsub {
+  background: rgba(194, 80, 80, 0.15);
+  color: #e08f8f;
+  border-color: rgba(194, 80, 80, 0.4);
+}
+
+.wbs-icon-btn {
+  background: none;
+  border: none;
+  color: #8f98a0;
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 14px;
+  border-radius: 2px;
+}
+.wbs-icon-btn:hover { color: #ffffff; background: rgba(255, 255, 255, 0.08); }
+
+.wbs-update-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: linear-gradient(to right, rgba(164, 208, 7, 0.18), rgba(117, 176, 34, 0.1));
+  border-bottom: 1px solid rgba(164, 208, 7, 0.45);
+  color: #d2e885;
+  font-size: 12px;
+}
+.wbs-update-banner a {
+  color: #a4d007;
+  font-weight: 600;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+.wbs-update-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #8f98a0;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.wbs-update-close:hover { color: #ffffff; }
+
+.wbs-body { padding: 10px 12px; }
+
+.wbs-range-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #acb8c4;
+}
+.wbs-range-row input[type="number"] {
+  width: 58px;
+  padding: 3px 6px;
+  background: #0e141b;
+  border: 1px solid #323f4d;
+  border-radius: 2px;
+  color: #c7d5e0;
+  font-size: 12px;
+}
+
+.wbs-status-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+  color: #8f98a0;
+  font-size: 12px;
+}
+.wbs-status-line .wbs-status { color: #66c0f4; }
+.wbs-status-line .wbs-status.wbs-warn { color: #e0a35f; }
+
+.wbs-progress-track {
+  height: 6px;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.wbs-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(to right, #75b022, #a4d007);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.wbs-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.wbs-btn {
+  padding: 5px 14px;
+  border: none;
+  border-radius: 2px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #c7d5e0;
+  background: rgba(103, 193, 245, 0.18);
+  border: 1px solid rgba(103, 193, 245, 0.3);
+  font-family: inherit;
+}
+.wbs-btn:hover:not(:disabled) { background: rgba(103, 193, 245, 0.32); color: #ffffff; }
+.wbs-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.wbs-btn.wbs-btn-green {
+  background: linear-gradient(to right, #75b022 5%, #588a1b 95%);
+  border: 1px solid #a4d007;
+  color: #d2e885;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.3);
+}
+.wbs-btn.wbs-btn-green:hover:not(:disabled) {
+  background: linear-gradient(to right, #8ed629 5%, #6aa021 95%);
+  color: #ffffff;
+}
+
+.wbs-btn.wbs-btn-red {
+  background: rgba(194, 80, 80, 0.2);
+  border: 1px solid rgba(194, 80, 80, 0.45);
+  color: #e08f8f;
+}
+.wbs-btn.wbs-btn-red:hover:not(:disabled) { background: rgba(194, 80, 80, 0.35); color: #ffffff; }
+
+.wbs-log {
+  max-height: 120px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid #2a475e;
+  border-radius: 3px;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.7;
+  color: #8f98a0;
+  display: none;
+}
+.wbs-log.wbs-open { display: block; }
+.wbs-log .wbs-log-ok { color: #a4d007; }
+.wbs-log .wbs-log-fail { color: #e08f8f; }
+.wbs-log .wbs-log-info { color: #66c0f4; }
+.wbs-log .wbs-log-ts { color: #55606a; }
+
+.wbs-log::-webkit-scrollbar { width: 8px; }
+.wbs-log::-webkit-scrollbar-thumb { background: #2a475e; border-radius: 4px; }
+
+.wbs-settings {
+  display: none;
+  margin-top: 8px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid #2a475e;
+  border-radius: 3px;
+}
+.wbs-settings.wbs-open { display: block; }
+
+.wbs-settings label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #acb8c4;
+}
+
+.wbs-settings input[type="number"] {
+  width: 70px;
+  padding: 3px 6px;
+  background: #0e141b;
+  border: 1px solid #323f4d;
+  border-radius: 2px;
+  color: #c7d5e0;
+  font-size: 12px;
+}
+
+.wbs-settings label.wbs-check-row {
+  justify-content: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+.wbs-settings input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: #588a1b;
+  cursor: pointer;
+}
+
+.wbs-footer {
+  padding: 0 12px 8px;
+  font-size: 10px;
+  color: #55606a;
+}
