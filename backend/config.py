@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 APP_NAME = "Steam 工具助手"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 # 开发环境：工程根目录；PyInstaller 打包后：可写数据目录取 exe 同级，只读资源取解包目录
 if getattr(sys, "frozen", False):
