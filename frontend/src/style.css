@@ -246,7 +246,12 @@ tr.ignored, .game-card.ignored { opacity: 0.45; }
   border-radius: 999px;
   padding: 2px 10px;
   vertical-align: middle;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
 }
+
+.ver-badge .ver-num { color: var(--primary); font-weight: 700; }
 
 header .header-right { margin-left: auto; display: flex; align-items: center; }
 
@@ -314,7 +319,24 @@ nav button.pending { color: var(--warn); }
 
 .update-link:hover { text-decoration: underline; }
 
-.build-tag { color: var(--muted); }
+.build-tag {
+  color: var(--muted);
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+}
+
+/* 关于弹窗版本块 */
+.about-version {
+  background: #fafbfc;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+
+.about-ver-main { font-size: 22px; font-weight: 800; color: var(--primary); }
+
+.about-ver-sub { margin-top: 4px; font-size: 12px; color: var(--muted); font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
 
 /* 账号绑定分步状态条 */
 .steps {
