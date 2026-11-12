@@ -114,6 +114,20 @@ class SteamClient:
 
     # ---------- 业务接口 ----------
 
+    def get_country_code(self) -> str | None:
+        """通过公开资料接口识别账号所在国家/地区，返回小写商店区码（如 cn）；识别不到返回 None。"""
+        if not self.api_key or not self.steamid:
+            return None
+        data = self._get_json(
+            f"{config.STEAM_API_BASE}/ISteamUser/GetPlayerSummaries/v2/",
+            {"key": self.api_key, "steamids": self.steamid},
+        )
+        players = (data.get("response") or {}).get("players") or []
+        if not players:
+            return None
+        cc = str(players[0].get("loccountrycode") or "").strip()
+        return cc.lower() or None
+
     def get_owned_games(self) -> list[dict]:
         if not self.api_key or not self.steamid:
             raise SteamApiError("缺少 API Key 或 SteamID，无法拉取游戏库")
