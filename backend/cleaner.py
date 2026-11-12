@@ -166,11 +166,7 @@ def _worker(rule: dict) -> None:
     def on_progress(done: int, hit: bool) -> None:
         _update(current=done, message=f"读取详情 {done}/{total}")
 
-    details_map, detail_failed = scanner._fetch_many(client, appids, thr, on_progress)
-    if total and detail_failed == total:
-        _update(state="error", message="游戏详情全部拉取失败，可能被网络或地区策略拦截，请稍后重试",
-                finished_at=_now())
-        return
+    details_map = scanner._fetch_many(client, appids, thr, on_progress)
 
     delisted_policy = rule.get("delisted", "exclude")   # keep / exclude / only
     include_paid = bool(rule.get("include_paid", False))
