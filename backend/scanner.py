@@ -293,48 +293,34 @@ def _concurrency() -> int:
 
 
 def _fetch_many(client: SteamClient, appids: list[int], thr: Throttler,
-                on_progress) -> tuple[dict[int, dict | None], int]:
+                on_progress) -> dict[int, dict | None]:
     """并发拉取多个 appid 详情；缓存命中跳过限速间隔。
 
-    返回 ({appid: details|None}, 失败条数)。所有传入 appid 都会出现在结果中；
-    单条详情失败（403/网络/解析等）被隔离为 None，交由判定层归为「待确认」，
-    不会因一条异常拖垮整批。限流 429 属于全局信号，仍向上抛出由顶层退避处理。
+    返回 {appid: details|None}，所有传入 appid 都会出现在结果中（缺失为 None），
+    不会因并发或单条失败而漏掉条目。
     """
     uniq = list(dict.fromkeys(appids))
     results: dict[int, dict | None] = {}
     if not uniq:
-        return results, 0
+        return results
 
     def one(aid: int):
-        try:
-            details = client.get_appdetails(aid)
-            hit = client.last_cache_hit
-            if not hit:
-                thr.wait_random_delay()
-            return aid, details, hit, None
-        except RateLimited:
-            raise  # 限流需全局退避，不在单条层隔离
-        except SteamApiError as exc:
-            return aid, None, False, str(exc)
-        except Exception as exc:  # noqa: BLE001 - 单条详情异常隔离，避免整批中断
-            return aid, None, False, f"详情拉取异常：{exc}"
+        details = client.get_appdetails(aid)
+        hit = client.last_cache_hit
+        if not hit:
+            thr.wait_random_delay()
+        return aid, details, hit
 
     done = 0
-    failed = 0
     with ThreadPoolExecutor(max_workers=_concurrency()) as ex:
         futs = [ex.submit(one, aid) for aid in uniq]
         for fut in as_completed(futs):
-            aid, details, hit, err = fut.result()
+            aid, details, hit = fut.result()
             results[aid] = details
             done += 1
-            if err:
-                failed += 1
-                logstore.add("WARN", f"条目 {aid} 详情拉取失败，已标记待确认：{err}")
             on_progress(done, hit)
             _check_pause()
-    if failed:
-        logstore.add("WARN", f"共 {failed}/{len(uniq)} 条详情拉取失败，已标记为待确认")
-    return results, failed
+    return results
 
 
 def _scan_worker(kind: str) -> None:
@@ -384,11 +370,7 @@ def _scan_dlc(client: SteamClient, thr: Throttler) -> None:
                 message=f"读取本体 {done}/{n_games}")
 
     parent_ids = [g["appid"] for g in games]
-    parent_map, parent_failed = _fetch_many(client, parent_ids, thr, on_parent)
-
-    # 本体详情全部拉取失败：属账号/网络/地区级问题，按错误中断并提示，不假装盘点完成
-    if n_games and parent_failed == n_games:
-        raise SteamApiError("本体详情全部拉取失败，可能被网络或地区策略拦截，请稍后重试")
+    parent_map = _fetch_many(client, parent_ids, thr, on_parent)
 
     # 按 DLC 去重聚合挂载本体；同一 DLC 挂多个本体时只拉一次、只落库一次
     parents_of: dict[int, list[int]] = {}
@@ -408,9 +390,7 @@ def _scan_dlc(client: SteamClient, thr: Throttler) -> None:
             cached[0] += 1
         _update(current=done, cached=cached[0], message=f"拉取 DLC 详情 {done}/{total}")
 
-    dlc_map, dlc_failed = _fetch_many(client, dlc_ids, thr, on_dlc)
-    if total and dlc_failed == total:
-        raise SteamApiError("DLC 详情全部拉取失败，可能被网络或地区策略拦截，请稍后重试")
+    dlc_map = _fetch_many(client, dlc_ids, thr, on_dlc)
 
     counts = {"claimable": 0, "owned": 0, "skipped": 0, "unknown": 0}
     _update(stage="写入结果", current=total, total=total, message="正在写入判定结果…")
@@ -425,9 +405,8 @@ def _scan_dlc(client: SteamClient, thr: Throttler) -> None:
             _update(current=idx, cached=cached[0], counts=dict(counts),
                     message=f"写入结果 {idx}/{total}")
 
-    fail_note = f"；{dlc_failed} 条详情失败已标记待确认" if dlc_failed else ""
     logstore.add("INFO", f"DLC 盘点完成：{counts}")
-    _update(state="done", stage="完成", message=f"DLC 盘点完成{fail_note}",
+    _update(state="done", stage="完成", message="DLC 盘点完成",
             finished_at=_now(), counts=counts)
 
 
@@ -458,9 +437,7 @@ def _scan_free_games(client: SteamClient, thr: Throttler) -> None:
             cached[0] += 1
         _update(current=done, cached=cached[0], message=f"核定价格 {done}/{total}")
 
-    details_map, detail_failed = _fetch_many(client, [i["appid"] for i in items], thr, on_item)
-    if total and detail_failed == total:
-        raise SteamApiError("喜加一详情全部拉取失败，可能被网络或地区策略拦截，请稍后重试")
+    details_map = _fetch_many(client, [i["appid"] for i in items], thr, on_item)
 
     _update(stage="写入结果", current=total, total=total, message="正在写入判定结果…")
     for idx, item in enumerate(items, start=1):
@@ -473,7 +450,6 @@ def _scan_free_games(client: SteamClient, thr: Throttler) -> None:
             _update(current=idx, cached=cached[0], counts=dict(counts),
                     message=f"写入结果 {idx}/{total}")
 
-    fail_note = f"；{detail_failed} 条详情失败已标记待确认" if detail_failed else ""
     logstore.add("INFO", f"喜加一盘点完成：{counts}")
-    _update(state="done", stage="完成", message=f"喜加一盘点完成{fail_note}",
+    _update(state="done", stage="完成", message="喜加一盘点完成",
             finished_at=_now(), counts=counts)
