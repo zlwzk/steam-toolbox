@@ -10,9 +10,9 @@ import sys
 from pathlib import Path
 
 APP_NAME = "Steam 工具助手"
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 # 内部构建号：随每次发版递增，用于排查「外部版号相同但构建不同」的问题；前端在关于/调试信息中可见。
-BUILD_NUMBER = 2026111201
+BUILD_NUMBER = 2026111202
 
 # 开发环境：工程根目录；PyInstaller 打包后：可写数据目录取 exe 同级，只读资源取解包目录
 if getattr(sys, "frozen", False):
@@ -50,6 +50,27 @@ DB_PATH = DATA_DIR / "claimer.db"
 # 商店区与语言
 DEFAULT_CC = "cn"
 DEFAULT_LANG = "schinese"
+
+# 商店区由后端依据账号公开资料自动识别，不再开放手动填写；语言可在下拉框选择。
+# l= 参数代码 → 展示名（前端下拉与后端白名单共用同一组代码）
+LANG_OPTIONS: dict[str, str] = {
+    "schinese": "简体中文",
+    "tchinese": "繁体中文",
+    "english": "英语",
+    "japanese": "日语",
+    "koreana": "韩语",
+    "russian": "俄语",
+    "german": "德语",
+    "french": "法语",
+    "spanish": "西班牙语",
+    "portuguese": "葡萄牙语",
+    "italian": "意大利语",
+    "polish": "波兰语",
+    "turkish": "土耳其语",
+    "arabic": "阿拉伯语",
+    "thai": "泰语",
+    "vietnamese": "越南语",
+}
 
 # 抓取阶段（盘点/读数据）
 FETCH_CONCURRENCY = 3            # 抓取并发线程数；商店详情接口限流相对宽松，过高易触发 429
