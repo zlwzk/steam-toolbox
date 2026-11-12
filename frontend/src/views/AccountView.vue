@@ -4,6 +4,27 @@ import { api } from '../api'
 import { useMsg } from '../useMsg'
 
 const emit = defineEmits(['navigate', 'session-refresh'])
+
+// 与后端 config.LANG_OPTIONS 对齐；商店区由后端自动识别，前端不可手动修改
+const LANG_OPTIONS = [
+  { code: 'schinese', label: '简体中文' },
+  { code: 'tchinese', label: '繁体中文' },
+  { code: 'english', label: '英语' },
+  { code: 'japanese', label: '日语' },
+  { code: 'koreana', label: '韩语' },
+  { code: 'russian', label: '俄语' },
+  { code: 'german', label: '德语' },
+  { code: 'french', label: '法语' },
+  { code: 'spanish', label: '西班牙语' },
+  { code: 'portuguese', label: '葡萄牙语' },
+  { code: 'italian', label: '意大利语' },
+  { code: 'polish', label: '波兰语' },
+  { code: 'turkish', label: '土耳其语' },
+  { code: 'arabic', label: '阿拉伯语' },
+  { code: 'thai', label: '泰语' },
+  { code: 'vietnamese', label: '越南语' },
+]
+
 const form = ref({ api_key: '', steamid: '', cc: 'cn', lang: 'schinese' })
 const ownedCount = ref(0)
 const status = ref({ has_key: false, has_steamid: false, profile_exists: false })
@@ -14,10 +35,10 @@ const STEAMID_RE = /^\d{16,18}$/
 
 function normalizeForm() {
   form.value = {
+    ...form.value,
     api_key: (form.value.api_key || '').trim(),
     steamid: (form.value.steamid || '').trim(),
-    cc: (form.value.cc || '').trim() || 'cn',
-    lang: (form.value.lang || '').trim() || 'schinese',
+    lang: form.value.lang || 'schinese',
   }
 }
 
@@ -65,9 +86,13 @@ async function save() {
       err('SteamID 应为 17 位纯数字（通常 7656119 开头），请检查是否多填了空格或字母')
       return
     }
-    const r = await api.saveAccount(form.value)
+    const payload = { api_key: form.value.api_key, steamid: form.value.steamid, lang: form.value.lang }
+    const r = await api.saveAccount(payload)
     if (r.ok) {
-      ok('✓ 保存成功，账号信息已写入本机数据库，下次打开无需重新填写')
+      form.value.cc = r.cc || form.value.cc
+      ok(r.cc_detected !== false
+        ? '✓ 保存成功，账号信息已写入本机数据库，下次打开无需重新填写'
+        : '✓ 已保存；区域暂未能自动识别，' + (r.cc_note || '将沿用默认区'))
       await refreshStatus()
     } else {
       err('保存失败：' + (r.error || '未知原因'))
@@ -87,8 +112,10 @@ async function test() {
       err('SteamID 应为 17 位纯数字（通常 7656119 开头），请检查是否多填了空格或字母')
       return
     }
-    const r = await api.testAccount(form.value)
+    const payload = { api_key: form.value.api_key, steamid: form.value.steamid, lang: form.value.lang }
+    const r = await api.testAccount(payload)
     if (r.ok) {
+      form.value.cc = r.cc || form.value.cc
       ok(`连接成功，库内 ${r.owned_count} 个本体`)
       await refreshStatus()
     } else err('连接失败：' + (r.error || '未知原因'))
@@ -152,12 +179,15 @@ async function test() {
     </div>
     <div class="row">
       <div class="field">
-        <label>商店区（cc）</label>
-        <input v-model="form.cc" placeholder="cn" />
+        <label>商店区（自动识别）</label>
+        <input v-model="form.cc" placeholder="保存后自动识别" disabled />
+        <span class="muted hint">根据账号公开资料自动识别所在地区，不可手动修改。</span>
       </div>
       <div class="field">
-        <label>语言（l）</label>
-        <input v-model="form.lang" placeholder="schinese" />
+        <label>界面 / 商店语言</label>
+        <select v-model="form.lang">
+          <option v-for="opt in LANG_OPTIONS" :key="opt.code" :value="opt.code">{{ opt.label }}</option>
+        </select>
       </div>
     </div>
 
