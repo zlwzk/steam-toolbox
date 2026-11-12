@@ -31,6 +31,14 @@ class RateLimited(SteamApiError):
         super().__init__("Steam 限流 (429)")
 
 
+class StoreBlocked(SteamApiError):
+    """商店域名被网络 / 地区 / 反爬整体拦截（Akamai Access Denied 403 或拦截页）。
+
+    与单条无数据不同：这类错误通常是当前出口 IP 被拦，应在扫描层快速熔断并
+    提示用户检查网络 / 代理，而不是逐条慢速重试把清单全部标成未知。
+    """
+
+
 class SteamClient:
     def __init__(self, api_key: str, steamid: str, cc: str | None = None,
                  lang: str | None = None, verify_ssl: bool = True):
@@ -40,7 +48,13 @@ class SteamClient:
         self.lang = lang or config.DEFAULT_LANG
         self.session = requests.Session()
         self.session.verify = verify_ssl
-        self.session.headers.update({"User-Agent": "SteamToolbox/1.0 (local tool)"})
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Referer": "https://store.steampowered.com/",
+        })
         self._ssl_fallback = False
         self._local = threading.local()
 
@@ -102,6 +116,11 @@ class SteamClient:
         if resp.status_code == 401:
             raise SteamApiError("API Key 无效或已失效，请重新到 Steam 申请 Key 后保存")
         if resp.status_code == 403:
+            if "store.steampowered.com" in url:
+                raise StoreBlocked(
+                    "商店接口被当前网络 / 地区拦截（403 Access Denied）：请检查网络、"
+                    "切换可用代理或更换网络后重试；官方账号接口不受影响"
+                )
             raise SteamApiError("无权访问该账号资料：请检查 SteamID 是否正确、账号资料是否私密，或 Key 权限是否足够")
         try:
             resp.raise_for_status()
@@ -110,6 +129,12 @@ class SteamClient:
         try:
             return resp.json()
         except ValueError:
+            text = resp.text or ""
+            if "store.steampowered.com" in url and ("Access Denied" in text or "AkamaiGHost" in text):
+                raise StoreBlocked(
+                    "商店接口被当前网络 / 地区拦截（返回拦截页）：请检查网络、"
+                    "切换可用代理或更换网络后重试"
+                )
             raise SteamApiError("Steam 返回了无法解析的内容（可能是网络拦截页或地区限制）")
 
     # ---------- 业务接口 ----------
@@ -150,25 +175,47 @@ class SteamClient:
         return response.get("games") or []
 
     def get_appdetails(self, appid: int) -> dict | None:
-        cached = self._cache_get(appid)
-        if cached is not None:
-            self.last_cache_hit = True
-            return cached
-        self.last_cache_hit = False
-        data = self._get_json(
-            f"{config.STORE_API_BASE}/appdetails",
-            {
-                "appids": appid,
-                "cc": self.cc,
-                "l": self.lang,
-                "filters": "basic,price_overview,dlc,SupportedLanguages,release_date,header_image,short_description",
-            },
-        )
-        node = data.get(str(appid)) or {}
-        body = node.get("data") if node.get("success") else None
-        if body is not None:
-            self._cache_set(appid, body)
-        return body
+        return self.get_appdetails_batch([appid]).get(appid)
+
+    def get_appdetails_batch(self, appids: list[int]) -> dict[int, dict | None]:
+        """批量读取商店详情。appdetails 接口支持逗号分隔多 appid，一次请求取一批，
+        相比逐条请求可显著减少往返；缓存命中的条目直接跳过，不再发请求。
+
+        返回 {appid: 详情体 | None}；单条无数据为 None，整批被拦截则抛 StoreBlocked。
+        """
+        uniq = [int(a) for a in dict.fromkeys(appids) if a]
+        result: dict[int, dict | None] = {}
+        pending: list[int] = []
+        cached = self._cache_get_many(uniq)
+        for appid in uniq:
+            if appid in cached:
+                result[appid] = cached[appid]
+            else:
+                pending.append(appid)
+        self.last_cache_hit = bool(uniq) and not pending
+
+        batch_size = config.APPDETAILS_BATCH_SIZE
+        for i in range(0, len(pending), batch_size):
+            chunk = pending[i:i + batch_size]
+            data = self._get_json(
+                f"{config.STORE_API_BASE}/appdetails",
+                {
+                    "appids": ",".join(str(a) for a in chunk),
+                    "cc": self.cc,
+                    "l": self.lang,
+                    "filters": "basic,price_overview,dlc,SupportedLanguages,release_date,header_image,short_description",
+                },
+            )
+            body_map: dict[int, dict] = {}
+            for appid in chunk:
+                node = data.get(str(appid)) or {}
+                body = node.get("data") if node.get("success") else None
+                result[appid] = body
+                if body is not None:
+                    body_map[appid] = body
+            if body_map:
+                self._cache_set_many(body_map)
+        return result
 
     def owns_app(self, appid: int) -> bool:
         """校验单个 DLC/本体是否已拥有（CheckAppOwnership）。"""
@@ -237,4 +284,42 @@ class SteamClient:
                 "INSERT INTO scan_cache(appid, body, fetched_at) VALUES (?, ?, ?) "
                 "ON CONFLICT(appid) DO UPDATE SET body = excluded.body, fetched_at = excluded.fetched_at",
                 (appid, json.dumps(body, ensure_ascii=False), now),
+            )
+
+    def _cache_get_many(self, appids: list[int]) -> dict[int, dict | None]:
+        """批量查缓存，返回未过期的条目；过期 / 缺失的不在结果中。"""
+        if not appids:
+            return {}
+        placeholders = ",".join("?" for _ in appids)
+        out: dict[int, dict | None] = {}
+        ttl = self._cache_ttl()
+        with database.get_conn() as conn:
+            rows = conn.execute(
+                f"SELECT appid, body, fetched_at FROM scan_cache WHERE appid IN ({placeholders})",
+                appids,
+            ).fetchall()
+        now = dt.datetime.now()
+        for row in rows:
+            try:
+                fetched = dt.datetime.fromisoformat(row["fetched_at"])
+                if (now - fetched).total_seconds() > ttl:
+                    continue
+                out[row["appid"]] = json.loads(row["body"]) if row["body"] else None
+            except (ValueError, TypeError):
+                continue
+        return out
+
+    def _cache_set_many(self, bodies: dict[int, dict]) -> None:
+        if not bodies:
+            return
+        now = dt.datetime.now().isoformat(timespec="seconds")
+        rows = [
+            (appid, json.dumps(body, ensure_ascii=False), now)
+            for appid, body in bodies.items()
+        ]
+        with database.get_conn() as conn:
+            conn.executemany(
+                "INSERT INTO scan_cache(appid, body, fetched_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(appid) DO UPDATE SET body = excluded.body, fetched_at = excluded.fetched_at",
+                rows,
             )

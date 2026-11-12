@@ -13,7 +13,6 @@ from __future__ import annotations
 import datetime as dt
 import random
 import re
-import shutil
 import threading
 import time
 from pathlib import Path
@@ -33,6 +32,7 @@ claim_progress: dict = {
     "current": 0,
     "message": "",
     "current_item": None,
+    "browser": "",           # 实际启动的浏览器标签（Edge / Chrome / 自带 Chromium）
     "counts": {"success": 0, "failed": 0, "skipped": 0, "blocked": 0},
     "started_at": None,
     "finished_at": None,
@@ -118,27 +118,36 @@ _CHANNEL_ORDER = {
 
 
 def _profile_dir(channel: str | None) -> Path:
-    """按渠道隔离持久化目录，避免 Chrome / Edge 共用同一 Profile 出现锁与组件冲突。"""
+    """按渠道隔离持久化目录，避免 Chrome / Edge 共用同一 Profile 出现锁与组件冲突。
+
+    各渠道独立目录，不做跨渠道数据迁移：不同内核的缓存/组件互拷反而会让
+    另一浏览器启动异常；首次使用某渠道时在该浏览器内重新登录一次即可。
+    """
     sub = channel or "chromium"
-    base = config.DATA_DIR / "browser_profile"
-    d = base / sub
-    if not d.exists():
-        # 首次按渠道隔离：旧版本共用目录里若已有登录态，复制一份作为该渠道专属目录
-        if base.exists() and any(base.iterdir()):
-            try:
-                shutil.copytree(base, d)
-            except Exception:  # noqa: BLE001
-                d.mkdir(parents=True, exist_ok=True)
-        else:
-            d.mkdir(parents=True, exist_ok=True)
+    d = config.DATA_DIR / "browser_profile" / sub
+    d.mkdir(parents=True, exist_ok=True)
     return d
 
 
+def _detect_real_channel(page) -> str:
+    """从真实 UA 判断实际启动的浏览器内核（Edg / Chrome / Chromium），而非只看传入 channel。"""
+    try:
+        ua = page.evaluate("() => navigator.userAgent") or ""
+    except Exception:  # noqa: BLE001
+        return ""
+    if "Edg/" in ua:
+        return "msedge"
+    if "Chrome/" in ua:
+        return "chrome"
+    return "chromium"
+
+
 def _launch_context(pw, headless: bool, channel_pref: str = "msedge"):
-    """按设置渠道启动浏览器；返回 (context, 实际渠道名称)。
+    """按设置渠道启动浏览器；返回 (context, 实际渠道标签, 实际渠道 key)。
 
     首选渠道失败时才依次回退其余本机浏览器 / 自带 Chromium，每一步都写日志，
-    避免静默换浏览器而用户误以为仍在用所选浏览器。
+    避免静默换浏览器而用户误以为仍在用所选浏览器。启动后再用 UA 复核真实内核，
+    与所选不符时在日志与进度里标明实际浏览器。
     """
     order = _CHANNEL_ORDER.get(channel_pref, _CHANNEL_ORDER["msedge"])
     last_err: Exception | None = None
@@ -154,9 +163,14 @@ def _launch_context(pw, headless: bool, channel_pref: str = "msedge"):
             if channel:
                 kwargs["channel"] = channel
             ctx = pw.chromium.launch_persistent_context(**kwargs)
-            label = _CHANNEL_LABEL[channel]
+            # 用真实 UA 复核实际内核，防止所选渠道启动后被静默替换
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            real_key = _detect_real_channel(page) or channel
+            label = _CHANNEL_LABEL.get(real_key, _CHANNEL_LABEL[channel])
+            if real_key != channel:
+                logstore.add("WARN", f"浏览器内核与所选不符：所选 {_CHANNEL_LABEL[channel]}，实际为 {label}")
             logstore.add("INFO", f"领取浏览器已启动：{label}")
-            return ctx, label
+            return ctx, label, real_key
         except Exception as exc:  # noqa: BLE001
             last_err = exc
             logstore.add("WARN", f"渠道「{_CHANNEL_LABEL[channel]}」启动失败，尝试下一个：{exc}")
@@ -320,8 +334,8 @@ def _claim_worker(items: list[dict]) -> None:
 
     with sync_playwright() as pw:
         try:
-            context, browser_label = _launch_context(pw, headless, channel_pref)
-            _update(message=f"浏览器已启动：{browser_label}")
+            context, browser_label, _real_key = _launch_context(pw, headless, channel_pref)
+            _update(browser=browser_label, message=f"浏览器已启动：{browser_label}")
         except Exception as exc:  # noqa: BLE001
             logstore.add("ERROR", f"浏览器启动失败：{exc}")
             _persist_state("error")
@@ -394,7 +408,8 @@ def open_login_window() -> None:
     def _worker() -> None:
         channel_pref = database.get_setting("browser_channel", "msedge")
         with sync_playwright() as pw:
-            context, browser_label = _launch_context(pw, headless=False, channel_pref=channel_pref)
+            context, browser_label, _real_key = _launch_context(pw, headless=False, channel_pref=channel_pref)
+            claim_progress["browser"] = browser_label
             logstore.add("INFO", f"登录窗口已打开：{browser_label}")
             try:
                 page = context.pages[0] if context.pages else context.new_page()

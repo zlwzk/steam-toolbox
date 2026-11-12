@@ -70,6 +70,7 @@ onUnmounted(() => clearInterval(timer))
       </button>
       <button @click="exportRecords">导出记录 CSV</button>
       <span class="muted">{{ prog.message }}</span>
+      <span class="muted" v-if="prog.browser">浏览器：{{ prog.browser }}</span>
       <span class="msg" :class="'msg-' + msg.type" v-if="msg.text">{{ msg.text }}</span>
     </div>
     <div class="muted" v-if="resumable" style="margin-top:8px;">

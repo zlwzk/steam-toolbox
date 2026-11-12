@@ -10,9 +10,9 @@ import sys
 from pathlib import Path
 
 APP_NAME = "Steam 工具助手"
-APP_VERSION = "1.2.4"
+APP_VERSION = "1.2.5"
 # 内部构建号：随每次发版递增，用于排查「外部版号相同但构建不同」的问题；前端在关于/调试信息中可见。
-BUILD_NUMBER = 2026111204
+BUILD_NUMBER = 2026111205
 
 # 开发环境：工程根目录；PyInstaller 打包后：可写数据目录取 exe 同级，只读资源取解包目录
 if getattr(sys, "frozen", False):
@@ -73,9 +73,10 @@ LANG_OPTIONS: dict[str, str] = {
 }
 
 # 抓取阶段（盘点/读数据）
-FETCH_CONCURRENCY = 3            # 抓取并发线程数；商店详情接口限流相对宽松，过高易触发 429
-FETCH_DELAY_MIN = 0.4            # 每个未命中缓存请求的最小间隔（秒）
-FETCH_DELAY_MAX = 1.0            # 每个未命中缓存请求的最大间隔（秒）
+FETCH_CONCURRENCY = 4            # 抓取并发线程数；商店详情接口限流相对宽松，过高易触发 429
+FETCH_DELAY_MIN = 0.3            # 每个未命中缓存批次请求的最小间隔（秒）
+FETCH_DELAY_MAX = 0.8            # 每个未命中缓存批次请求的最大间隔（秒）
+APPDETAILS_BATCH_SIZE = 10       # 单次 appdetails 请求合并的 appid 数量，减少往返
 CACHE_TTL_HOURS = 24             # appdetails 本地缓存有效期
 
 # 领取阶段（MVP 暂未启用自动领取，参数先落库预留）

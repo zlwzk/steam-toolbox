@@ -12,7 +12,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import config, database, logstore, notify
-from .steam_client import RateLimited, SteamApiError, SteamClient
+from .steam_client import RateLimited, SteamApiError, SteamClient, StoreBlocked
 from .throttler import ThrottleConfig, Throttler
 
 progress: dict = {
@@ -294,46 +294,75 @@ def _concurrency() -> int:
 
 def _fetch_many(client: SteamClient, appids: list[int], thr: Throttler,
                 on_progress) -> tuple[dict[int, dict | None], int]:
-    """并发拉取多个 appid 详情；缓存命中跳过限速间隔。
+    """分批并发拉取详情：每批合并为一次 appdetails 请求，减少往返。
 
-    返回 ({appid: details|None}, 失败条数)。所有传入 appid 都会出现在结果中；
-    单条详情失败（403/网络/解析等）被隔离为 None，交由判定层归为「待确认」，
-    不会因一条异常拖垮整批。限流 429 属于全局信号，仍向上抛出由顶层退避处理。
+    返回 ({appid: details|None}, 失败条数)。所有传入 appid 都会出现在结果中：
+    - 单条无数据/解析失败隔离为 None，交由判定层归为「待确认」；
+    - 整批被商店拦截（StoreBlocked，403/拦截页）计入熔断，连续多批被拦即中断，
+      不再逐条慢速重试把清单全部标成未知；
+    - 限流 429 属于全局信号，仍向上抛出由顶层退避处理。
     """
     uniq = list(dict.fromkeys(appids))
     results: dict[int, dict | None] = {}
     if not uniq:
         return results, 0
 
-    def one(aid: int):
+    batch_size = config.APPDETAILS_BATCH_SIZE
+    blocks = [uniq[i:i + batch_size] for i in range(0, len(uniq), batch_size)]
+    blocked_blocks = 0
+    BLOCK_BLOCK_LIMIT = 2  # 连续被拦批次达到该值即判定出口被整体拦截，快速熔断
+
+    def fetch_block(chunk: list[int]):
         try:
-            details = client.get_appdetails(aid)
-            hit = client.last_cache_hit
-            if not hit:
+            batch = client.get_appdetails_batch(chunk)
+            # 未命中缓存才施加批间随机间隔；整批命中缓存则不等待
+            if not client.last_cache_hit:
                 thr.wait_random_delay()
-            return aid, details, hit, None
+            return chunk, batch, None, None
+        except StoreBlocked as exc:
+            return chunk, None, None, ("blocked", str(exc))
         except RateLimited:
-            raise  # 限流需全局退避，不在单条层隔离
+            raise  # 限流需全局退避，不在批次层隔离
         except SteamApiError as exc:
-            return aid, None, False, str(exc)
-        except Exception as exc:  # noqa: BLE001 - 单条详情异常隔离，避免整批中断
-            return aid, None, False, f"详情拉取异常：{exc}"
+            return chunk, None, None, ("err", str(exc))
+        except Exception as exc:  # noqa: BLE001 - 单批异常隔离，避免整批中断
+            return chunk, None, None, ("err", f"详情拉取异常：{exc}")
 
     done = 0
     failed = 0
+    blocked = 0
     with ThreadPoolExecutor(max_workers=_concurrency()) as ex:
-        futs = [ex.submit(one, aid) for aid in uniq]
+        futs = [ex.submit(fetch_block, b) for b in blocks]
         for fut in as_completed(futs):
-            aid, details, hit, err = fut.result()
-            results[aid] = details
-            done += 1
-            if err:
-                failed += 1
-                logstore.add("WARN", f"条目 {aid} 详情拉取失败，已标记待确认：{err}")
-            on_progress(done, hit)
+            chunk, batch, _, err = fut.result()
+            if err and err[0] == "blocked":
+                blocked_blocks += 1
+                blocked += len(chunk)
+                logstore.add("WARN", f"批次 {chunk[0]}… 被商店拦截：{err[1]}")
+                for aid in chunk:
+                    results.setdefault(aid, None)
+                if blocked_blocks >= BLOCK_BLOCK_LIMIT:
+                    for f in futs:
+                        f.cancel()
+                    raise StoreBlocked(err[1])
+            else:
+                blocked_blocks = 0
+                if err:
+                    failed += len(chunk)
+                    for aid in chunk:
+                        results.setdefault(aid, None)
+                    logstore.add("WARN", f"批次 {chunk[0]}… 详情拉取失败：{err[1]}")
+                else:
+                    for aid, body in (batch or {}).items():
+                        results[aid] = body
+            done += len(chunk)
+            on_progress(done, False)
             _check_pause()
+
     if failed:
         logstore.add("WARN", f"共 {failed}/{len(uniq)} 条详情拉取失败，已标记为待确认")
+    if blocked:
+        logstore.add("WARN", f"{blocked} 条因商店接口被拦截而缺失详情")
     return results, failed
 
 
@@ -353,6 +382,8 @@ def _scan_worker(kind: str) -> None:
         wait = thr.backoff(0, exc.retry_after)
         _update(state="error", message=f"被 Steam 限流，已等待 {wait:.0f}s 后仍中断，请稍后重试",
                 finished_at=_now())
+    except StoreBlocked as exc:
+        _update(state="error", message=f"商店接口被拦截：{exc}", finished_at=_now())
     except SteamApiError as exc:
         _update(state="error", message=f"账号/接口错误：{exc}", finished_at=_now())
     except Exception as exc:  # noqa: BLE001 - 顶层兜底，落库为错误状态
