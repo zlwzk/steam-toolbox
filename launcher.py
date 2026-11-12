@@ -45,6 +45,14 @@ def _setup_logging() -> None:
         lg.propagate = False
 
 
+def _health_ok() -> bool:
+    try:
+        with urllib.request.urlopen(f"http://{HOST}:{PORT}/api/health", timeout=2) as resp:
+            return resp.status == 200
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _existing_instance() -> bool:
     """端口已被占用且 /api/health 正常，说明已有本工具实例在运行。"""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -54,15 +62,15 @@ def _existing_instance() -> bool:
             return False
     finally:
         sock.close()
-    try:
-        with urllib.request.urlopen(f"http://{HOST}:{PORT}/api/health", timeout=2) as resp:
-            return resp.status == 200
-    except Exception:  # noqa: BLE001
-        return False
+    return _health_ok()
 
 
 def _open_browser() -> None:
-    time.sleep(1.5)
+    # 等待后端就绪再打开页面，避免浏览器先于服务启动而出现「连接被拒」
+    for _ in range(20):  # 最多约 10 秒
+        if _health_ok():
+            break
+        time.sleep(0.5)
     webbrowser.open(f"http://{HOST}:{PORT}")
 
 
@@ -74,6 +82,9 @@ if __name__ == "__main__":
         webbrowser.open(f"http://{HOST}:{PORT}")
     else:
         threading.Thread(target=_open_browser, daemon=True).start()
-        # log_config=None：不覆盖上面挂到日志缓冲的 handler；access_log=False 不打访问日志
-        uvicorn.run(app, host=HOST, port=PORT, log_level="info",
-                    access_log=False, log_config=None)
+        try:
+            # log_config=None：不覆盖上面挂到日志缓冲的 handler；access_log=False 不打访问日志
+            uvicorn.run(app, host=HOST, port=PORT, log_level="info",
+                        access_log=False, log_config=None)
+        except OSError as exc:  # 端口被占用等启动失败：写进软件日志缓冲，便于在界面排查
+            logstore.add("ERROR", f"本地服务启动失败（端口 {PORT} 可能被占用）：{exc}")

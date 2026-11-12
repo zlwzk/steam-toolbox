@@ -1,10 +1,27 @@
 const BASE = '/api'
 
-async function req(path, opts = {}) {
-  const resp = await fetch(BASE + path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...opts,
-  })
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function req(path, opts = {}, retries = 1) {
+  let resp
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      resp = await fetch(BASE + path, {
+        headers: { 'Content-Type': 'application/json' },
+        ...opts,
+      })
+      break
+    } catch (e) {
+      // 本地后端未就绪（启动竞态）或端口被占用：有限重试，仍失败再给出明确中文提示
+      if (attempt < retries) {
+        await delay(500 * (attempt + 1))
+        continue
+      }
+      throw new Error('无法连接本地服务：后端尚未就绪或端口被占用，请关闭软件后重新打开')
+    }
+  }
   if (!resp.ok) {
     throw new Error((await resp.text()) || `请求失败 ${resp.status}`)
   }

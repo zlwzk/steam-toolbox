@@ -26,6 +26,15 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def _no_cache_html(request, call_next):
+    """index.html 不缓存，避免升级后浏览器仍加载旧版前端 JS；带 hash 的 assets 由浏览器正常缓存。"""
+    resp = await call_next(request)
+    if "text/html" in resp.headers.get("content-type", ""):
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return resp
+
+
 def _setup_logging() -> None:
     """把应用与 uvicorn 日志接入软件内缓冲（无控制台窗口时仍可查看）。"""
     handler = logstore.BufferHandler()

@@ -10,6 +10,21 @@ const status = ref({ has_key: false, has_steamid: false, profile_exists: false }
 const { msg, ok, err, errText } = useMsg()
 const testing = ref(false)
 const saving = ref(false)
+const STEAMID_RE = /^\d{16,18}$/
+
+function normalizeForm() {
+  form.value = {
+    api_key: (form.value.api_key || '').trim(),
+    steamid: (form.value.steamid || '').trim(),
+    cc: (form.value.cc || '').trim() || 'cn',
+    lang: (form.value.lang || '').trim() || 'schinese',
+  }
+}
+
+function steamidInvalid() {
+  const sid = form.value.steamid
+  return sid && !STEAMID_RE.test(sid)
+}
 
 onMounted(async () => {
   try {
@@ -45,6 +60,11 @@ async function refreshStatus() {
 async function save() {
   saving.value = true
   try {
+    normalizeForm()
+    if (steamidInvalid()) {
+      err('SteamID 应为 17 位纯数字（通常 7656119 开头），请检查是否多填了空格或字母')
+      return
+    }
     const r = await api.saveAccount(form.value)
     if (r.ok) {
       ok('✓ 保存成功，账号信息已写入本机数据库，下次打开无需重新填写')
@@ -62,6 +82,11 @@ async function save() {
 async function test() {
   testing.value = true
   try {
+    normalizeForm()
+    if (steamidInvalid()) {
+      err('SteamID 应为 17 位纯数字（通常 7656119 开头），请检查是否多填了空格或字母')
+      return
+    }
     const r = await api.testAccount(form.value)
     if (r.ok) {
       ok(`连接成功，库内 ${r.owned_count} 个本体`)

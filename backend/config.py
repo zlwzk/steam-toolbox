@@ -5,13 +5,14 @@
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 APP_NAME = "Steam 工具助手"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 # 内部构建号：随每次发版递增，用于排查「外部版号相同但构建不同」的问题；前端在关于/调试信息中可见。
-BUILD_NUMBER = 20261112
+BUILD_NUMBER = 2026111201
 
 # 开发环境：工程根目录；PyInstaller 打包后：可写数据目录取 exe 同级，只读资源取解包目录
 if getattr(sys, "frozen", False):
@@ -22,7 +23,27 @@ else:
     RESOURCE_DIR = APP_DIR
 
 BASE_DIR = APP_DIR
-DATA_DIR = APP_DIR / "data"
+
+
+def _writable_dir(path: Path) -> bool:
+    """探测目录能否创建并写入（exe 落在 Program Files 等受保护目录时可能不可写）。"""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".write_test"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
+
+
+# 数据目录优先 exe 同级；打包后若该目录只读/无权限，回退到用户本地目录，避免写库失败导致保存报错
+_data_candidates = [APP_DIR / "data"]
+if getattr(sys, "frozen", False):
+    _local_appdata = os.environ.get("LOCALAPPDATA")
+    if _local_appdata:
+        _data_candidates.append(Path(_local_appdata) / "SteamToolbox" / "data")
+DATA_DIR = next((c for c in _data_candidates if _writable_dir(c)), _data_candidates[-1])
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "claimer.db"
 
