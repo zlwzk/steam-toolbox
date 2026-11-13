@@ -296,6 +296,86 @@ class SteamClient:
         )
         return bool(data.get("appownership", {}).get("ownsapp"))
 
+    def get_workshop_details(self, file_ids: list[int]) -> dict[int, dict]:
+        """读取工坊物品详情（GetDetails），返回 {file_id: 详情体}。
+
+        字段容错：接口缺字段时给默认值；单条 result 非 1 视为无数据，不抛错。
+        """
+        uniq = [int(f) for f in dict.fromkeys(file_ids) if f]
+        if not uniq:
+            return {}
+        data = self._get_json(
+            f"{config.STEAM_API_BASE}/IPublishedFileService/GetDetails/v1/",
+            {
+                "key": self.api_key,
+                "publishedfileids": ",".join(str(f) for f in uniq),
+                "return_tags": 1,
+                "return_description": 1,
+                "return_previews": 0,
+            },
+        )
+        details = (data.get("response") or {}).get("publishedfiledetails") or []
+        out: dict[int, dict] = {}
+        for node in details:
+            try:
+                fid = int(node.get("publishedfileid"))
+            except (TypeError, ValueError):
+                continue
+            if str(node.get("result", "1")) not in ("1", "OK", "None"):
+                continue
+            tags = [t.get("tag", "") for t in (node.get("tags") or []) if t.get("tag")]
+            out[fid] = {
+                "file_id": fid,
+                "appid": int(node.get("consumer_appid") or 0),
+                "title": node.get("title") or "",
+                "description": node.get("description") or "",
+                "file_size": int(node.get("file_size") or 0),
+                "time_created": int(node.get("time_created") or 0),
+                "time_updated": int(node.get("time_updated") or 0),
+                "preview_url": node.get("preview_url") or "",
+                "tags": tags,
+            }
+        return out
+
+    def query_workshop(self, appid: int, num_per_page: int = 20,
+                       cursor: str = "*") -> dict:
+        """按最近更新排序查询某游戏工坊物品（QueryFiles）。
+
+        返回 {items: [{file_id, appid, title, time_updated, preview_url, tags}], next_cursor}。
+        """
+        data = self._get_json(
+            f"{config.STEAM_API_BASE}/IPublishedFileService/QueryFiles/v1/",
+            {
+                "key": self.api_key,
+                "appid": int(appid),
+                "query_type": 10,  # RankedByUpdatedDate
+                "filetype": 0,     # workshop item
+                "numperpage": max(1, min(50, int(num_per_page))),
+                "cursor": cursor or "*",
+                "return_tags": 1,
+                "return_previews": 0,
+            },
+        )
+        response = data.get("response") or {}
+        items: list[dict] = []
+        for node in response.get("publishedfiledetails") or []:
+            try:
+                fid = int(node.get("publishedfileid"))
+            except (TypeError, ValueError):
+                continue
+            tags = [t.get("tag", "") for t in (node.get("tags") or []) if t.get("tag")]
+            items.append({
+                "file_id": fid,
+                "appid": int(node.get("consumer_appid") or appid),
+                "title": node.get("title") or "",
+                "file_size": int(node.get("file_size") or 0),
+                "time_created": int(node.get("time_created") or 0),
+                "time_updated": int(node.get("time_updated") or 0),
+                "preview_url": node.get("preview_url") or "",
+                "tags": tags,
+            })
+        return {"items": items, "next_cursor": str(response.get("nextcursor") or "*")}
+
     def search_free_games(self, pages: int = 2, count: int = 50) -> list[dict]:
         """抓取商店「免费」筛选列表，提取 appid / 名称 / 小封面。
 

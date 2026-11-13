@@ -6,6 +6,7 @@ import ScanView from './views/ScanView.vue'
 import CandidatesView from './views/CandidatesView.vue'
 import FreeGamesView from './views/FreeGamesView.vue'
 import WorkshopView from './views/WorkshopView.vue'
+import MonitorView from './views/MonitorView.vue'
 import CleanerView from './views/CleanerView.vue'
 import ClaimView from './views/ClaimView.vue'
 import SettingsView from './views/SettingsView.vue'
@@ -19,6 +20,7 @@ const tabs = [
   { key: 'candidates', label: 'DLC 清单' },
   { key: 'freegames', label: '喜加一' },
   { key: 'workshop', label: '工坊订阅' },
+  { key: 'monitor', label: '更新监控' },
   { key: 'cleaner', label: '库清理' },
   { key: 'claim', label: '领取记录' },
   { key: 'settings', label: '速率设置' },
@@ -30,12 +32,13 @@ const comps = {
   candidates: CandidatesView,
   freegames: FreeGamesView,
   workshop: WorkshopView,
+  monitor: MonitorView,
   cleaner: CleanerView,
   claim: ClaimView,
   settings: SettingsView,
 }
 const active = ref(localStorage.getItem('steam_dlc_tab') || 'dashboard')
-const version = ref('1.2.7')
+const version = ref('1.2.8')
 const build = ref('')
 const session = ref({ configured: false, has_key: false, has_steamid: false, profile_exists: false })
 const update = ref({ available: false, latest: '', release_url: '' })

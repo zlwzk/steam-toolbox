@@ -66,7 +66,12 @@
       disclaimer: 'For personal use only. Data stays in your browser.',
       modeSubscribe: 'SUBSCRIBE',
       modeUnsubscribe: 'UNSUBSCRIBE',
-      close: 'Close'
+      close: 'Close',
+      monitorGame: 'Monitor This Game',
+      monitorMod: 'Monitor This Mod',
+      copiedId: 'ID {id} copied. Add it in the desktop app → Update Monitor.',
+      monitorNoAppid: 'No AppID found on this page.',
+      monitorNoMod: 'No Mod ID found on this page.'
     },
     zh: {
       panelTitle: '批量订阅',
@@ -131,7 +136,12 @@
       disclaimer: '仅限个人使用，数据保存在本地浏览器。',
       modeSubscribe: '订阅',
       modeUnsubscribe: '退订',
-      close: '关闭'
+      close: '关闭',
+      monitorGame: '监控此游戏',
+      monitorMod: '监控此 Mod',
+      copiedId: '已复制 ID：{id}，请到桌面软件「更新监控」中添加。',
+      monitorNoAppid: '本页未找到 AppID。',
+      monitorNoMod: '本页未找到 Mod ID。'
     }
   };
 

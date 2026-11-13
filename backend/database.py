@@ -140,6 +140,59 @@ CREATE TABLE IF NOT EXISTS cleaner_items (
     ignored INTEGER DEFAULT 0,
     fetched_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS watch_games (
+    appid INTEGER PRIMARY KEY,
+    name TEXT,
+    cover_url TEXT,
+    watch_store INTEGER DEFAULT 1,
+    watch_workshop INTEGER DEFAULT 1,
+    last_fingerprint TEXT,
+    last_workshop_top TEXT,
+    last_checked_at TEXT,
+    last_change TEXT,
+    added_at TEXT,
+    updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS watch_mods (
+    published_file_id INTEGER PRIMARY KEY,
+    appid INTEGER,
+    title TEXT,
+    cover_url TEXT,
+    file_size INTEGER DEFAULT 0,
+    time_updated INTEGER DEFAULT 0,
+    last_time_updated INTEGER DEFAULT 0,
+    last_file_size INTEGER DEFAULT 0,
+    subscribed INTEGER DEFAULT 0,
+    last_checked_at TEXT,
+    change_note TEXT,
+    added_at TEXT,
+    updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS watch_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    appid INTEGER DEFAULT 0,
+    keywords TEXT,
+    match_mode TEXT DEFAULT 'any',
+    auto_subscribe INTEGER DEFAULT 0,
+    enabled INTEGER DEFAULT 1,
+    note TEXT,
+    created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS watch_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT,
+    appid INTEGER,
+    file_id INTEGER,
+    title TEXT,
+    detail TEXT,
+    detected_at TEXT,
+    seen INTEGER DEFAULT 0,
+    action TEXT DEFAULT 'none'
+);
 """
 
 # 旧库兜底迁移：补充后加的列
@@ -328,6 +381,9 @@ def scan_overview() -> dict:
         cl_rows = conn.execute(
             "SELECT status, COUNT(*) AS n FROM cleaner_items GROUP BY status"
         ).fetchall()
+        ev_unread = conn.execute(
+            "SELECT COUNT(*) AS n FROM watch_events WHERE seen = 0"
+        ).fetchone()["n"]
 
     dlc = {r["status"]: r["n"] for r in dlc_rows}
     free = {r["status"]: r["n"] for r in free_rows}
@@ -343,5 +399,176 @@ def scan_overview() -> dict:
         "ws_pending": ws.get("pending", 0),
         "cleaner_total": sum(cl.values()),
         "cleaner_candidate": cl.get("candidate", 0),
+        "watch_unread": ev_unread,
         "last_scan_at": last,
     }
+
+
+# ---------- 更新监控（本机留存，不上传） ----------
+
+def upsert_watch_game(appid: int, name: str = "", cover_url: str = "",
+                      watch_store: int = 1, watch_workshop: int = 1) -> None:
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO watch_games(appid, name, cover_url, watch_store, watch_workshop, added_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(appid) DO UPDATE SET name=excluded.name, cover_url=excluded.cover_url, "
+            "watch_store=excluded.watch_store, watch_workshop=excluded.watch_workshop, updated_at=excluded.updated_at",
+            (appid, name, cover_url, watch_store, watch_workshop, now, now),
+        )
+
+
+def list_watch_games() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM watch_games ORDER BY updated_at DESC").fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_watch_game(appid: int) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM watch_games WHERE appid = ?", (appid,)).fetchone()
+    return dict(row) if row else None
+
+
+def update_watch_game_snapshot(appid: int, fingerprint: str | None,
+                               workshop_top: str | None, change: str) -> None:
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE watch_games SET last_fingerprint=?, last_workshop_top=?, last_checked_at=?, "
+            "last_change=?, updated_at=? WHERE appid=?",
+            (fingerprint, workshop_top, now, change, now, appid),
+        )
+
+
+def delete_watch_game(appid: int) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM watch_games WHERE appid = ?", (appid,))
+
+
+def upsert_watch_mod(file_id: int, appid: int, title: str = "", cover_url: str = "",
+                     file_size: int = 0, time_updated: int = 0, subscribed: int = 0) -> None:
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO watch_mods(published_file_id, appid, title, cover_url, file_size, time_updated, "
+            "last_time_updated, last_file_size, subscribed, added_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(published_file_id) DO UPDATE SET appid=excluded.appid, title=excluded.title, "
+            "cover_url=excluded.cover_url, file_size=excluded.file_size, time_updated=excluded.time_updated, "
+            "subscribed=excluded.subscribed, updated_at=excluded.updated_at",
+            (file_id, appid, title, cover_url, file_size, time_updated, time_updated, file_size,
+             subscribed, now, now),
+        )
+
+
+def list_watch_mods() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM watch_mods ORDER BY updated_at DESC").fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_watch_mod(file_id: int) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM watch_mods WHERE published_file_id = ?", (file_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def update_watch_mod_snapshot(file_id: int, file_size: int, time_updated: int,
+                              change_note: str) -> None:
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE watch_mods SET last_time_updated=time_updated, last_file_size=file_size, "
+            "file_size=?, time_updated=?, last_checked_at=?, change_note=?, updated_at=? "
+            "WHERE published_file_id=?",
+            (file_size, time_updated, now, change_note, now, file_id),
+        )
+
+
+def mark_watch_mod_subscribed(file_id: int, subscribed: int) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE watch_mods SET subscribed=?, updated_at=? WHERE published_file_id=?",
+            (subscribed, dt.datetime.now().isoformat(timespec="seconds"), file_id),
+        )
+
+
+def delete_watch_mod(file_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM watch_mods WHERE published_file_id = ?", (file_id,))
+
+
+def add_watch_rule(appid: int, keywords: str, match_mode: str, auto_subscribe: int,
+                   enabled: int, note: str) -> int:
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO watch_rules(appid, keywords, match_mode, auto_subscribe, enabled, note, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (appid, keywords, match_mode, auto_subscribe, enabled, note, now),
+        )
+        return cur.lastrowid
+
+
+def list_watch_rules() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM watch_rules ORDER BY id ASC").fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_watch_rule(rule_id: int, appid: int, keywords: str, match_mode: str,
+                      auto_subscribe: int, enabled: int, note: str) -> bool:
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE watch_rules SET appid=?, keywords=?, match_mode=?, auto_subscribe=?, enabled=?, note=? "
+            "WHERE id=?",
+            (appid, keywords, match_mode, auto_subscribe, enabled, note, rule_id),
+        )
+        return cur.rowcount > 0
+
+
+def delete_watch_rule(rule_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM watch_rules WHERE id = ?", (rule_id,))
+
+
+def add_watch_event(kind: str, appid: int | None, file_id: int | None, title: str,
+                    detail: str, action: str = "none") -> int:
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO watch_events(kind, appid, file_id, title, detail, detected_at, seen, action) "
+            "VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
+            (kind, appid, file_id, title, detail, now, action),
+        )
+        return cur.lastrowid
+
+
+def list_watch_events(kind: str | None = None, only_unread: bool = False,
+                      limit: int = 200) -> list[dict]:
+    sql = "SELECT * FROM watch_events WHERE 1=1"
+    args: list = []
+    if kind:
+        sql += " AND kind = ?"
+        args.append(kind)
+    if only_unread:
+        sql += " AND seen = 0"
+    sql += " ORDER BY id DESC LIMIT ?"
+    args.append(limit)
+    with get_conn() as conn:
+        rows = conn.execute(sql, args).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_events_read(event_ids: list[int] | None = None) -> int:
+    with get_conn() as conn:
+        if event_ids:
+            placeholders = ",".join("?" for _ in event_ids)
+            cur = conn.execute(
+                f"UPDATE watch_events SET seen = 1 WHERE id IN ({placeholders})", event_ids
+            )
+        else:
+            cur = conn.execute("UPDATE watch_events SET seen = 1 WHERE seen = 0")
+        return cur.rowcount

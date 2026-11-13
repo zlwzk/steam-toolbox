@@ -21,6 +21,8 @@ _INTEGERS = {
     "ws_max_retries": (0, 10),
     "ws_max_pages": (1, 100),
     "scan_interval_minutes": (15, 10080),
+    "watch_interval_minutes": (15, 10080),
+    "watch_workshop_top": (1, 50),
 }
 _FLOATS = {
     "fetch_delay_min": (0.2, 120.0),
@@ -46,6 +48,8 @@ _CHOICES = {
     "scan_kind": {"dlc", "freegame", "both"},
     "cleaner_unit": {"minute", "hour"},
     "cleaner_exclude_delisted": {"keep", "exclude", "only"},
+    "watch_auto": {"true", "false"},
+    "watch_auto_subscribe": {"true", "false"},
 }
 _RANGES = (
     ("fetch_delay_min", "fetch_delay_max"),

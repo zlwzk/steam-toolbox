@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Steam 工具助手 · 工坊批量订阅",
-  "version": "1.0.0",
-  "description": "一键批量订阅 / 退订 Steam 创意工坊当前页（或全部页）Mod，拟人节奏、自动翻页、失败重试，数据仅存本地。Steam Toolbox Workshop batch subscribe / unsubscribe.",
-  "permissions": ["storage", "cookies"],
+  "version": "1.1.0",
+  "description": "一键批量订阅 / 退订 Steam 创意工坊当前页（或全部页）Mod，拟人节奏、自动翻页、失败重试；可复制游戏 / Mod ID 加入桌面端更新监控。数据仅存本地。Steam Toolbox Workshop batch subscribe / monitor.",
+  "permissions": ["storage", "cookies", "clipboardWrite"],
   "host_permissions": [
     "https://steamcommunity.com/*",
     "https://api.github.com/*"
@@ -14,7 +14,8 @@
   "content_scripts": [
     {
       "matches": [
-        "https://steamcommunity.com/workshop/browse/*"
+        "https://steamcommunity.com/workshop/browse/*",
+        "https://steamcommunity.com/sharedfiles/filedetails/*"
       ],
       "js": ["i18n.js", "panel.js", "content.js"],
       "css": ["panel.css"],

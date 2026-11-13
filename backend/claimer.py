@@ -414,25 +414,87 @@ def list_records(limit: int = 200) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def open_login_window() -> None:
-    """打开有头浏览器供首次手动登录 Steam，登录态写入持久化 Profile。"""
+# ---------- 浏览器登录窗口（状态可被前端轮询） ----------
+
+login_progress: dict = {
+    "state": "idle",        # idle / starting / ready / logged_in / closed / blocked / error
+    "message": "",
+    "browser": "",
+    "started_at": None,
+}
+_login_lock = threading.Lock()
+
+
+def get_login_status() -> dict:
+    with _login_lock:
+        return dict(login_progress)
+
+
+def _set_login(**kwargs) -> None:
+    with _login_lock:
+        login_progress.update(kwargs)
+
+
+def open_login_window() -> dict:
+    """打开有头浏览器供首次手动登录 Steam，登录态写入持久化 Profile。
+
+    返回即时状态：playwright 缺失 / 浏览器启动失败会以 error 同步回传，
+    不再被后台线程静默吞掉；窗口打开后的进度由 get_login_status() 轮询。
+    """
     if sync_playwright is None:
         raise ClaimError("未安装 Playwright：请先 pip install playwright")
 
-    def _worker() -> None:
-        channel_pref = database.get_setting("browser_channel", "msedge")
-        with sync_playwright() as pw:
-            context, browser_label, _real_key = _launch_context(pw, headless=False, channel_pref=channel_pref)
-            claim_progress["browser"] = browser_label
-            logstore.add("INFO", f"登录窗口已打开：{browser_label}")
-            try:
-                page = context.pages[0] if context.pages else context.new_page()
-                page.goto("https://store.steampowered.com/login/")
-                # 等待用户手动关闭窗口（最长 10 分钟）
-                page.wait_for_event("close", timeout=600000)
-            except Exception:  # noqa: BLE001
-                pass
-            finally:
-                context.close()
+    _set_login(state="starting", message="正在启动浏览器…", browser="",
+               started_at=dt.datetime.now().isoformat(timespec="seconds"))
+    threading.Thread(target=_login_worker, daemon=True).start()
+    return {"ok": True, "state": "starting"}
 
-    threading.Thread(target=_worker, daemon=True).start()
+
+def _login_worker() -> None:
+    channel_pref = database.get_setting("browser_channel", "msedge")
+    with sync_playwright() as pw:
+        context = None
+        try:
+            context, browser_label, _real_key = _launch_context(pw, headless=False,
+                                                                 channel_pref=channel_pref)
+            _set_login(browser=browser_label, state="ready",
+                       message=f"浏览器已打开（{browser_label}），请在窗口中完成 Steam 登录")
+            logstore.add("INFO", f"登录窗口已打开：{browser_label}")
+            page = context.pages[0] if context.pages else context.new_page()
+            page.goto("https://store.steampowered.com/login/")
+
+            # 轮询登录态：出现账户下拉或离开登录页即视为已登录；最长等待 10 分钟
+            deadline = time.time() + 600
+            logged_in = False
+            while time.time() < deadline:
+                if page.is_closed():
+                    break
+                try:
+                    logged_in = bool(page.evaluate(
+                        "() => !!document.querySelector('#account_pulldown')"
+                    )) or ("/login" not in page.url and "store.steampowered.com/account" in page.url)
+                except Exception:  # noqa: BLE001
+                    logged_in = False
+                if logged_in:
+                    _set_login(state="logged_in", message="已检测到 Steam 登录，登录态已留存本机")
+                    logstore.add("INFO", "检测到 Steam 登录成功")
+                    break
+                time.sleep(2)
+
+            if not logged_in and not page.is_closed():
+                # 用户尚未登录就关闭标签，或超时：保持 ready/提示，不伪造成功
+                try:
+                    page.wait_for_event("close", timeout=5)
+                except Exception:  # noqa: BLE001
+                    pass
+            _set_login(state="closed" if logged_in else "ready",
+                       message="登录窗口已关闭" if logged_in else "登录窗口仍在等待登录")
+        except Exception as exc:  # noqa: BLE001
+            logstore.add("ERROR", f"登录窗口启动失败：{exc}")
+            _set_login(state="error", message=f"浏览器启动失败：{exc}")
+        finally:
+            if context is not None:
+                try:
+                    context.close()
+                except Exception:  # noqa: BLE001
+                    pass

@@ -99,5 +99,26 @@ export const api = {
   saveSettings: (data) => req('/settings', { method: 'PUT', body: JSON.stringify({ data }) }),
   schedulerStatus: () => req('/settings/scheduler-status'),
 
+  // 更新监控
+  monOverview: () => req('/monitor/overview'),
+  monGames: () => req('/monitor/games'),
+  monAddGame: (data) => req('/monitor/games', { method: 'POST', body: JSON.stringify(data) }),
+  monRemoveGame: (appid) => req(`/monitor/games/${appid}`, { method: 'DELETE' }),
+  monMods: () => req('/monitor/mods'),
+  monAddMod: (data) => req('/monitor/mods', { method: 'POST', body: JSON.stringify(data) }),
+  monRemoveMod: (fileId) => req(`/monitor/mods/${fileId}`, { method: 'DELETE' }),
+  monRules: () => req('/monitor/rules'),
+  monAddRule: (data) => req('/monitor/rules', { method: 'POST', body: JSON.stringify(data) }),
+  monUpdateRule: (id, data) => req(`/monitor/rules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  monRemoveRule: (id) => req(`/monitor/rules/${id}`, { method: 'DELETE' }),
+  monEvents: (params = {}) => req(`/monitor/events${qs(params)}`),
+  monReadEvents: (ids) => req('/monitor/events/read', { method: 'POST', body: JSON.stringify({ ids: ids || [] }) }),
+  monCheck: () => req('/monitor/check', { method: 'POST' }),
+  monProgress: () => req('/monitor/progress'),
+  monSubscribe: (items) => req('/monitor/subscribe', { method: 'POST', body: JSON.stringify({ items }) }),
+  monSettings: () => req('/monitor/settings'),
+  monSaveSettings: (data) => req('/monitor/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  loginStatus: () => req('/claim/login/status'),
+
   exportUrl: (kind, params = {}) => `${BASE}/${kind}/export.csv${qs(params)}`,
 }

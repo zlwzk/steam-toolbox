@@ -10,9 +10,9 @@ import sys
 from pathlib import Path
 
 APP_NAME = "Steam 工具助手"
-APP_VERSION = "1.2.7"
+APP_VERSION = "1.2.8"
 # 内部构建号：随每次发版递增，用于排查「外部版号相同但构建不同」的问题；前端在关于/调试信息中可见。
-BUILD_NUMBER = 2026111301
+BUILD_NUMBER = 2026111302
 
 # 开发环境：工程根目录；PyInstaller 打包后：可写数据目录取 exe 同级，只读资源取解包目录
 if getattr(sys, "frozen", False):
@@ -130,5 +130,10 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "ws_max_pages": "20",         # 自动翻页上限（1–100）
     # 库清理默认筛选
     "cleaner_unit": "hour",       # 时长单位：minute / hour
-    "cleaner_exclude_delisted": "exclude",  # keep 不排除 / exclude 排除下架 / only 仅看下架
+    "cleaner_exclude_delisted": "exclude",  # keep 不排除 / exclude 排除已下架 / only 仅看下架
+    # 更新监控默认设置
+    "watch_auto": "false",              # 定时巡检开关
+    "watch_interval_minutes": "360",     # 巡检间隔（分钟）
+    "watch_auto_subscribe": "false",     # 规则命中后是否自动订阅（总开关）
+    "watch_workshop_top": "20",          # 每次检查工坊取最近更新前 N 个
 }

@@ -12,9 +12,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from . import config, database, logstore, scheduler, updater
+from . import config, database, logstore, monitor, scheduler, updater
 from .security import add_security_headers, reject_unsafe_request
-from .routers import account, candidates, claim, cleaner, freegames, scan, session, settings, workshop
+from .routers import account, candidates, claim, cleaner, freegames, monitor as monitor_router, scan, session, settings, workshop
 
 app = FastAPI(title=config.APP_NAME, version=config.APP_VERSION)
 
@@ -60,6 +60,7 @@ def _startup() -> None:
     _setup_logging()
     database.init_db()
     scheduler.start()
+    monitor.start()
     logstore.add("INFO", f"{config.APP_NAME} v{config.APP_VERSION} 已启动")
 
 
@@ -98,6 +99,7 @@ app.include_router(claim.router)
 app.include_router(workshop.router)
 app.include_router(cleaner.router)
 app.include_router(settings.router)
+app.include_router(monitor_router.router)
 
 _dist = config.RESOURCE_DIR / "frontend" / "dist"
 if _dist.exists():

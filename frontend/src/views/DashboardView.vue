@@ -13,6 +13,7 @@ const cards = [
   { key: 'candidates', label: '可领 DLC', value: () => ov.value.dlc_claimable || 0, hint: '扫描并领取免费 DLC' },
   { key: 'freegames', label: '限时免费喜加一', value: () => ov.value.free_limited || 0, hint: '商店限免本体' },
   { key: 'workshop', label: '工坊待处理', value: () => ov.value.ws_pending || 0, hint: '批量订阅 / 退订 Mod' },
+  { key: 'monitor', label: '监控新动态', value: () => ov.value.watch_unread || 0, hint: '本体 / 工坊 / Mod 更新与命中' },
   { key: 'cleaner', label: '待清理候选', value: () => ov.value.cleaner_candidate || 0, hint: '按时长 / 下架筛选免费游戏' },
 ]
 
