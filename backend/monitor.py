@@ -217,6 +217,13 @@ def _detect_workshop(client: SteamClient, game: dict) -> list[dict]:
         except (ValueError, TypeError):
             old = {}
 
+    if not old:
+        # 首次建档：仅保存当前工坊基线，不把首屏 Mod 误报为「新上架」；
+        # 下一次检测起才对比出新增 / 更新。
+        database.update_watch_game_snapshot(game["appid"], game.get("last_fingerprint"),
+                                            new_top, "首次建档")
+        return events
+
     rules = database.list_watch_rules()
     auto_sub_global = database.get_setting("watch_auto_subscribe", "false").lower() == "true"
     auto_queue: list[dict] = []
