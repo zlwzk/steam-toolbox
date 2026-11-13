@@ -41,7 +41,8 @@ async function start(kind = 'dlc', force = false) {
     return
   }
   try {
-    await api.startScan(kind, force)
+    const r = await api.startScan(kind, force)
+    if (!r.ok) err(r.error || "扫描任务正在执行中")
     refresh()
   } catch (e) {
     err('启动扫描失败：' + errText(e))

@@ -10,9 +10,9 @@ import sys
 from pathlib import Path
 
 APP_NAME = "Steam 工具助手"
-APP_VERSION = "1.2.5"
+APP_VERSION = "1.2.6"
 # 内部构建号：随每次发版递增，用于排查「外部版号相同但构建不同」的问题；前端在关于/调试信息中可见。
-BUILD_NUMBER = 2026111205
+BUILD_NUMBER = 2026111206
 
 # 开发环境：工程根目录；PyInstaller 打包后：可写数据目录取 exe 同级，只读资源取解包目录
 if getattr(sys, "frozen", False):
@@ -110,7 +110,7 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "batch_rest_max": str(BATCH_REST_MAX),
     "max_retries": str(MAX_RETRIES),
     "auto_claim": "false",       # 默认人工勾选后再领
-    "verify_ssl": "false",       # 是否校验 SSL 证书；本机缺受信 CA 时默认关闭，代码遇证书错误也会自动降级重试
+    "verify_ssl": "true",        # 默认校验证书；证书错误不自动降级，必要时须用户显式选择风险选项
     "free_game_pages": "2",      # 喜加一搜索抓取页数（每页 50）
     "claim_headless": "false",   # 领取浏览器是否无头（首次登录建议有头）
     "browser_channel": "msedge", # 登录/领取浏览器：msedge（Edge）/ chrome / chromium（自带）

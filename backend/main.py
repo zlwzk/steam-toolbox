@@ -13,23 +13,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import config, database, logstore, scheduler, updater
+from .security import add_security_headers, reject_unsafe_request
 from .routers import account, candidates, claim, cleaner, freegames, scan, session, settings, workshop
 
 app = FastAPI(title=config.APP_NAME, version=config.APP_VERSION)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://[::1]:5173"],
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
 
 
 @app.middleware("http")
 async def _no_cache_html(request, call_next):
     """index.html 不缓存，避免升级后浏览器仍加载旧版前端 JS；带 hash 的 assets 由浏览器正常缓存。"""
-    resp = await call_next(request)
+    blocked = reject_unsafe_request(request)
+    if blocked is not None:
+        return add_security_headers(request, blocked)
+    resp = add_security_headers(request, await call_next(request))
     if "text/html" in resp.headers.get("content-type", ""):
         resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return resp

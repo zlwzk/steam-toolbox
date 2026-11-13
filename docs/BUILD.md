@@ -6,7 +6,7 @@
 
 | 形态 | Windows | macOS | 说明 |
 |---|---|---|---|
-| 桌面版（FastAPI + Vue + Playwright） | 提供预编译 zip | 需在 macOS 上从源码构建 | 含 DLC/喜加一领取、工坊订阅、库清理全部模块 |
+| 桌面版（FastAPI + Vue + Playwright） | Windows 单文件 exe | 需在 macOS 上从源码构建 | 含 DLC/喜加一领取、工坊订阅、库清理全部模块 |
 | 浏览器插件（MV3） | ✅ | ✅ | 仅工坊批量订阅/退订；Chrome 与 Edge 同一套包 |
 
 > **关于 macOS 预编译包**：PyInstaller 不支持交叉编译——无法在 Windows 上生成 macOS 可执行文件。因此 Release 中不提供伪造的 Mac 二进制；macOS 用户请按下方步骤在本机构建，或直接使用浏览器插件版。
@@ -23,10 +23,10 @@ npm install
 npm run build
 cd ..
 
-# 3. PyInstaller 打包（one-folder）
+# 3. PyInstaller 打包（one-file）
 python -m PyInstaller SteamToolbox.spec --distpath packaged --workpath build --noconfirm --clean
 ```
-产物：`packaged/SteamToolbox/SteamToolbox.exe`，整目录解压使用，勿单独移动 exe。
+产物：`packaged/SteamToolbox.exe`，单文件可直接运行。推荐执行 `scripts/build_windows.ps1` 先测试再打包。
 
 ## 二、macOS 桌面版构建
 

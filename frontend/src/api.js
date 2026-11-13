@@ -23,7 +23,14 @@ async function req(path, opts = {}, retries = 1) {
     }
   }
   if (!resp.ok) {
-    throw new Error((await resp.text()) || `请求失败 ${resp.status}`)
+    const body = await resp.text()
+    let error = body || `请求失败 ${resp.status}`
+    try {
+      const parsed = JSON.parse(body)
+      if (typeof parsed.detail === "string") error = parsed.detail
+      else if (typeof parsed.error === "string") error = parsed.error
+    } catch { /* non-JSON server error */ }
+    throw new Error(error)
   }
   return resp.json()
 }

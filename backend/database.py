@@ -14,8 +14,7 @@ def get_conn() -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(config.DB_PATH, timeout=5.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    # WAL 提升读写并发；busy_timeout 让并发写遇到锁时等待而非立即 database is locked
-    conn.execute("PRAGMA journal_mode = WAL")
+    # WAL is enabled once by init_db; avoid repeating PRAGMA on every read connection.
     conn.execute("PRAGMA busy_timeout = 5000")
     try:
         yield conn
@@ -175,6 +174,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 def init_db() -> None:
     with get_conn() as conn:
+        conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA)
         _migrate(conn)
         for key, value in config.DEFAULT_SETTINGS.items():
@@ -183,6 +183,16 @@ def init_db() -> None:
                 (key, value),
             )
         _tune_fetch_defaults(conn)
+        _enable_tls_by_default_once(conn)
+
+
+def _enable_tls_by_default_once(conn: sqlite3.Connection) -> None:
+    """One-time security migration. Explicit opt-out *after* upgrade is preserved."""
+    marker = "tls_secure_upgrade_v126"
+    seen = conn.execute("SELECT 1 FROM settings WHERE key = ?", (marker,)).fetchone()
+    if seen is None:
+        conn.execute("UPDATE settings SET value = 'true' WHERE key = 'verify_ssl' AND value = 'false'")
+        conn.execute("INSERT INTO settings(key, value) VALUES (?, 'true')", (marker,))
 
 
 def _tune_fetch_defaults(conn: sqlite3.Connection) -> None:
@@ -231,8 +241,13 @@ def set_setting(key: str, value: str) -> None:
 
 
 def update_settings(data: dict[str, str]) -> None:
-    for key, value in data.items():
-        set_setting(key, value)
+    """Commit all settings together so failures cannot leave partial edits."""
+    with get_conn() as conn:
+        conn.executemany(
+            "INSERT INTO settings(key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [(key, str(value)) for key, value in data.items()],
+        )
 
 
 # ---------- 领取队列（本机持久化，中断后续跑） ----------

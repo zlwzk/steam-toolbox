@@ -13,8 +13,9 @@ def start_scan(
     kind: str = Query(default="dlc", pattern="^(dlc|freegame)$"),
     force: bool = Query(default=False),
 ):
-    scanner.run_scan(kind, force=force)
-    return {"ok": True, "kind": kind, "force": force}
+    started = scanner.run_scan(kind, force=force)
+    return {"ok": started, "kind": kind, "force": force,
+            "error": None if started else "已有扫描正在进行或暂停中"}
 
 
 @router.post("/pause")

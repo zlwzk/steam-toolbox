@@ -206,8 +206,13 @@ def start_task(appid: str, mode: str = "subscribe", auto: bool = False,
                range_start: int = 0, range_end: int = 0) -> dict:
     if ws_progress["state"] == "running":
         return {"ok": False, "error": "工坊任务正在进行中"}
-    if not appid or not str(appid).isdigit():
+    appid = str(appid).strip()
+    if not appid.isdecimal() or len(appid) > 12 or int(appid) < 1:
         return {"ok": False, "error": "请填写有效的游戏 AppID"}
+    if mode not in ("subscribe", "unsubscribe"):
+        return {"ok": False, "error": "只支持订阅或退订"}
+    if range_start < 0 or range_end < 0 or (range_start and range_end and range_end < range_start):
+        return {"ok": False, "error": "序号范围无效"}
     s = database.get_settings()
     if not (s.get("api_key") and s.get("steamid")):
         return {"ok": False, "error": "请先在「账号绑定」填入 API Key 与 SteamID，并在弹出浏览器完成 Steam 登录"}
@@ -262,7 +267,7 @@ def _worker(appid: str, mode: str, auto: bool, range_start: int, range_end: int)
 
     with sync_playwright() as pw:
         try:
-            context, browser_label = claimer._launch_context(pw, headless, channel_pref)
+            context, browser_label, _real_key = claimer._launch_context(pw, headless, channel_pref)
             _update(message=f"浏览器已启动：{browser_label}")
         except Exception as exc:  # noqa: BLE001
             logstore.add("ERROR", f"浏览器启动失败：{exc}")
@@ -406,7 +411,7 @@ def _retry_worker(items: list[dict], appid: str) -> None:
                          "started_at": _now(), "finished_at": None, "cancelled": False})
     with sync_playwright() as pw:
         try:
-            context, _ = claimer._launch_context(pw, s.get("claim_headless", "false") == "true",
+            context, _, _real_key = claimer._launch_context(pw, s.get("claim_headless", "false") == "true",
                                                   s.get("browser_channel", "msedge"))
             page = context.pages[0] if context.pages else context.new_page()
             page.goto(_browse_url(appid, 1), wait_until="domcontentloaded", timeout=30000)

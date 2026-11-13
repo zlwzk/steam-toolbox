@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import re
 import threading
 from collections import deque
 
 _MAX = 500
+_SECRET_QUERY_RE = re.compile(r"(?i)([?&](?:key|api_key|token|access_token)=)[^&\s]+")
 _buf: deque[dict] = deque(maxlen=_MAX)
 _lock = threading.Lock()
 
@@ -19,7 +21,7 @@ def add(level: str, message: str) -> None:
     line = {
         "time": dt.datetime.now().isoformat(timespec="seconds"),
         "level": level,
-        "message": str(message).strip(),
+        "message": _SECRET_QUERY_RE.sub(r"\1[REDACTED]", str(message).strip()),
     }
     with _lock:
         _buf.append(line)
