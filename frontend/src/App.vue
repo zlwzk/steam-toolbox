@@ -38,7 +38,7 @@ const comps = {
   settings: SettingsView,
 }
 const active = ref(localStorage.getItem('steam_dlc_tab') || 'dashboard')
-const version = ref('1.2.9')
+const version = ref('1.2.11')
 const build = ref('')
 const session = ref({ configured: false, has_key: false, has_steamid: false, profile_exists: false })
 const update = ref({ available: false, latest: '', release_url: '' })

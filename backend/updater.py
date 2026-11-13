@@ -12,7 +12,7 @@ import time
 
 import requests
 
-from . import config
+from . import ca_store, config
 
 REPO = "zlwzk/steam-toolbox"
 _API = f"https://api.github.com/repos/{REPO}/releases/latest"
@@ -37,6 +37,7 @@ def _fetch_latest() -> dict:
         _API,
         headers={"Accept": "application/vnd.github+json", "User-Agent": "SteamToolbox-Updater"},
         timeout=8,
+        verify=ca_store.bundle_path(),
     )
     resp.raise_for_status()
     data = resp.json()
