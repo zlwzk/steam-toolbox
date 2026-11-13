@@ -112,7 +112,7 @@ jobs:
   release:
     name: Publish tagged build
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, windows, extension]
+    needs: [test, windows]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -121,14 +121,8 @@ jobs:
         with:
           name: SteamToolbox-windows-x64
           path: release
-      - uses: actions/download-artifact@v4
-        with:
-          name: SteamToolbox-workshop-extension
-          path: release
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             release/SteamToolbox.exe
-            release/SHA256SUMS.txt
-            release/steam-toolbox-workshop-extension.zip
           generate_release_notes: true

@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config, database, logstore, monitor, scheduler, updater
 from .security import add_security_headers, reject_unsafe_request
-from .routers import account, candidates, claim, cleaner, freegames, monitor as monitor_router, scan, session, settings, workshop
+from .routers import account, candidates, claim, cleaner, collections, freegames, monitor as monitor_router, pro, scan, session, settings, workshop
 
 app = FastAPI(title=config.APP_NAME, version=config.APP_VERSION)
 
@@ -98,8 +98,10 @@ app.include_router(freegames.router)
 app.include_router(claim.router)
 app.include_router(workshop.router)
 app.include_router(cleaner.router)
+app.include_router(collections.router)
 app.include_router(settings.router)
 app.include_router(monitor_router.router)
+app.include_router(pro.router)
 
 _dist = config.RESOURCE_DIR / "frontend" / "dist"
 if _dist.exists():
