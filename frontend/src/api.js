@@ -120,5 +120,15 @@ export const api = {
   monSaveSettings: (data) => req('/monitor/settings', { method: 'PUT', body: JSON.stringify(data) }),
   loginStatus: () => req('/claim/login/status'),
 
+  // 完整版激活态（本机持久化）
+  proStatus: () => req('/pro/status'),
+  proUnlock: () => req('/pro/unlock', { method: 'POST' }),
+
+  // 库自动分类（完整版）
+  colStatus: () => req('/collections/status'),
+  colPlan: (data) => req('/collections/plan', { method: 'POST', body: JSON.stringify(data) }),
+  colWrite: (data) => req('/collections/write', { method: 'POST', body: JSON.stringify(data) }),
+  colRestore: (data) => req('/collections/restore', { method: 'POST', body: JSON.stringify(data) }),
+
   exportUrl: (kind, params = {}) => `${BASE}/${kind}/export.csv${qs(params)}`,
 }

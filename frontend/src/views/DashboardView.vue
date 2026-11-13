@@ -1,21 +1,25 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 
 const emit = defineEmits(['navigate'])
 const ov = ref({})
+const pro = ref(false)
 
 async function load() {
   try { ov.value = await api.overview() } catch { /* 静默 */ }
+  try { pro.value = (await api.proStatus()).unlocked } catch { pro.value = false }
 }
 
-const cards = [
+const allCards = [
   { key: 'candidates', label: '可领 DLC', value: () => ov.value.dlc_claimable || 0, hint: '扫描并领取免费 DLC' },
   { key: 'freegames', label: '限时免费喜加一', value: () => ov.value.free_limited || 0, hint: '商店限免本体' },
   { key: 'workshop', label: '工坊待处理', value: () => ov.value.ws_pending || 0, hint: '批量订阅 / 退订 Mod' },
   { key: 'monitor', label: '监控新动态', value: () => ov.value.watch_unread || 0, hint: '本体 / 工坊 / Mod 更新与命中' },
   { key: 'cleaner', label: '待清理候选', value: () => ov.value.cleaner_candidate || 0, hint: '按时长 / 下架筛选免费游戏' },
+  { key: 'collections', label: '库分类', value: () => '完整版', hint: '按标签自动整理 30 个收藏夹', pro: true },
 ]
+const cards = computed(() => allCards.filter((c) => !c.pro || pro.value))
 
 onMounted(load)
 </script>
@@ -23,7 +27,7 @@ onMounted(load)
 <template>
   <div class="card">
     <h2 style="margin:0 0 6px;">Steam 工具助手</h2>
-    <p class="muted">免费 DLC 领取 · 创意工坊批量订阅 · 库清理，数据仅保存在本机，不上传。</p>
+    <p class="muted">免费 DLC 领取 · 创意工坊批量订阅 · 库清理 · 更新监控 · 库分类，数据仅保存在本机，不上传。</p>
 
     <div class="stats" style="margin-top:16px; flex-wrap:wrap;">
       <div class="stat" style="min-width:150px;">库内游戏<b>{{ ov.owned || 0 }}</b></div>
