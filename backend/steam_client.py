@@ -16,11 +16,18 @@ from requests.exceptions import (
     Timeout,
 )
 
-from . import config, database
+from . import config, database, logstore
 
 
 class SteamApiError(Exception):
-    """Steam 接口通用错误。"""
+    """Steam 接口通用错误。
+
+    status_code 为对应 HTTP 状态码；连接失败 / 响应无法解析等无状态码场景为 None。
+    """
+
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class RateLimited(SteamApiError):
@@ -108,18 +115,18 @@ class SteamClient:
             retry_after = float(raw) if raw and raw.isdigit() else None
             raise RateLimited(retry_after)
         if resp.status_code == 401:
-            raise SteamApiError("API Key 无效或已失效，请重新到 Steam 申请 Key 后保存")
+            raise SteamApiError("API Key 无效或已失效，请重新到 Steam 申请 Key 后保存", 401)
         if resp.status_code == 403:
             if "store.steampowered.com" in url:
                 raise StoreBlocked(
                     "商店接口被当前网络 / 地区拦截（403 Access Denied）：请检查网络、"
                     "切换可用代理或更换网络后重试；官方账号接口不受影响"
                 )
-            raise SteamApiError("无权访问该账号资料：请检查 SteamID 是否正确、账号资料是否私密，或 Key 权限是否足够")
+            raise SteamApiError("无权访问该账号资料：请检查 SteamID 是否正确、账号资料是否私密，或 Key 权限是否足够", 403)
         try:
             resp.raise_for_status()
         except HTTPError:
-            raise SteamApiError(f"Steam 接口返回错误（HTTP {resp.status_code}）")
+            raise SteamApiError(f"Steam 接口返回错误（HTTP {resp.status_code}）", resp.status_code)
         try:
             return resp.json()
         except ValueError:
@@ -171,11 +178,18 @@ class SteamClient:
     def get_appdetails(self, appid: int) -> dict | None:
         return self.get_appdetails_batch([appid]).get(appid)
 
+    # 合批接口被拒时允许降级为逐条请求的状态码；401/403 属鉴权或授权问题，
+    # 逐条重试同样会失败，不降级以免放大请求量。
+    _DEGRADABLE_STATUS = {400, 500, 502, 503, 504}
+
     def get_appdetails_batch(self, appids: list[int]) -> dict[int, dict | None]:
         """批量读取商店详情。appdetails 接口支持逗号分隔多 appid，一次请求取一批，
         相比逐条请求可显著减少往返；缓存命中的条目直接跳过，不再发请求。
 
         返回 {appid: 详情体 | None}；单条无数据为 None，整批被拦截则抛 StoreBlocked。
+
+        部分网络出口对「多 AppID 合批」返回 HTTP 400 / 5xx，此时本批次自动降级为
+        逐条请求；429 限流、403 整体拦截、401 鉴权失败等全局信号仍向上抛出。
         """
         uniq = [int(a) for a in dict.fromkeys(appids) if a]
         result: dict[int, dict | None] = {}
@@ -191,24 +205,87 @@ class SteamClient:
         batch_size = config.APPDETAILS_BATCH_SIZE
         for i in range(0, len(pending), batch_size):
             chunk = pending[i:i + batch_size]
-            data = self._get_json(
-                f"{config.STORE_API_BASE}/appdetails",
-                {
-                    "appids": ",".join(str(a) for a in chunk),
-                    "cc": self.cc,
-                    "l": self.lang,
-                    "filters": "basic,price_overview,dlc,SupportedLanguages,release_date,header_image,short_description",
-                },
+            bodies = self._fetch_chunk(chunk)
+            result.update(bodies)
+        return result
+
+    def _fetch_chunk(self, chunk: list[int]) -> dict[int, dict | None]:
+        """拉取一批详情；合批被可降级错误拒绝时退化为逐条请求。"""
+        try:
+            return self._fetch_batch(chunk)
+        except SteamApiError as exc:
+            if not self._degradable(exc):
+                raise
+            logstore.add(
+                "WARN",
+                f"批量详情接口返回 {exc.status_code or '异常'}，已降级为逐条请求（{len(chunk)} 个）",
             )
-            body_map: dict[int, dict] = {}
-            for appid in chunk:
-                node = data.get(str(appid)) or {}
-                body = node.get("data") if node.get("success") else None
-                result[appid] = body
-                if body is not None:
-                    body_map[appid] = body
-            if body_map:
-                self._cache_set_many(body_map)
+
+        out: dict[int, dict | None] = {}
+        body_map: dict[int, dict] = {}
+        for appid in chunk:
+            try:
+                body = self._fetch_single(appid)
+            except (RateLimited, StoreBlocked):
+                raise
+            except SteamApiError:
+                body = None
+            out[appid] = body
+            if body is not None:
+                body_map[appid] = body
+        if body_map:
+            self._cache_set_many(body_map)
+        return out
+
+    @classmethod
+    def _degradable(cls, exc: SteamApiError) -> bool:
+        """该错误是否值得在批次层退化为逐条请求。
+
+        限流（429）与商店整体拦截（403/拦截页）属全局信号，逐条同样会失败，
+        不降级；其余按状态码判断，无状态码的连接 / 解析异常允许降级一次。
+        """
+        if isinstance(exc, (RateLimited, StoreBlocked)):
+            return False
+        return exc.status_code is None or exc.status_code in cls._DEGRADABLE_STATUS
+
+    def _fetch_batch(self, chunk: list[int]) -> dict[int, dict | None]:
+        """一次合批请求整个 chunk，解析后写缓存。"""
+        data = self._get_json(
+            f"{config.STORE_API_BASE}/appdetails",
+            {
+                "appids": ",".join(str(a) for a in chunk),
+                "cc": self.cc,
+                "l": self.lang,
+                "filters": "basic,price_overview,dlc,SupportedLanguages,release_date,header_image,short_description",
+            },
+        )
+        return self._parse_appdetails(data, chunk)
+
+    def _fetch_single(self, appid: int) -> dict | None:
+        """单个 AppID 的详情请求（合批降级后的兜底路径）。"""
+        data = self._get_json(
+            f"{config.STORE_API_BASE}/appdetails",
+            {
+                "appids": str(appid),
+                "cc": self.cc,
+                "l": self.lang,
+                "filters": "basic,price_overview,dlc,SupportedLanguages,release_date,header_image,short_description",
+            },
+        )
+        return self._parse_appdetails(data, [appid]).get(appid)
+
+    def _parse_appdetails(self, data: dict, chunk: list[int]) -> dict[int, dict | None]:
+        """把 appdetails 返回体按 chunk 解析为 {appid: 详情体 | None}，命中条目写缓存。"""
+        result: dict[int, dict | None] = {}
+        body_map: dict[int, dict] = {}
+        for appid in chunk:
+            node = data.get(str(appid)) or {}
+            body = node.get("data") if node.get("success") else None
+            result[appid] = body
+            if body is not None:
+                body_map[appid] = body
+        if body_map:
+            self._cache_set_many(body_map)
         return result
 
     def owns_app(self, appid: int) -> bool:

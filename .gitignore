@@ -29,3 +29,13 @@ releases/
 # 编辑器
 .vscode/
 .idea/
+
+# pytest / 覆盖率
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# 系统杂项
+.DS_Store
+Thumbs.db
