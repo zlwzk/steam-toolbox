@@ -13,11 +13,15 @@ router = APIRouter(prefix="/api/session", tags=["session"])
 
 
 def _profile_has_login() -> bool:
-    """持久化浏览器 Profile 里是否留有登录 Cookie（仅看 Cookies 文件是否存在且非空，不读内容）。"""
+    """持久化浏览器 Profile 里是否留有登录 Cookie（仅看 Cookie 痕迹文件是否存在且非空，不读内容）。
+
+    兼容新旧 Chromium 布局：``Default/Cookies``、``Default/Network/Cookies``，
+    以及 WAL 未合并时的 ``Cookies-wal``；任一非空即视为留有登录痕迹。
+    """
     base = config.DATA_DIR / "browser_profile"
     if not base.exists():
         return False
-    for path in base.rglob("Cookies"):
+    for path in base.rglob("Cookies*"):
         try:
             if path.is_file() and path.stat().st_size > 0:
                 return True

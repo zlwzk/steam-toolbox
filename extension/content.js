@@ -79,6 +79,15 @@
     return m ? m[1] : null;
   }
 
+  function getFileIdFromUrl() {
+    const m = location.href.match(/filedetails\/\?id=(\d+)/);
+    return m ? m[1] : null;
+  }
+
+  function pageKind() {
+    return /sharedfiles\/filedetails\//.test(location.pathname) ? 'mod' : 'game';
+  }
+
   function getPageNo() {
     const m = location.search.match(/[?&]p=(\d+)/);
     return m ? parseInt(m[1], 10) : 1;
@@ -220,6 +229,27 @@
     a.download = `workshop-batch-subscribe-log-${Date.now()}.txt`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+
+  /* ---------- 加入桌面监控（复制 ID，引导到桌面端添加） ---------- */
+
+  async function copyToClipboard(text) {
+    try { await navigator.clipboard.writeText(text); return true; }
+    catch { return false; }
+  }
+
+  async function monitorTarget() {
+    if (pageKind() === 'mod') {
+      const fid = getFileIdFromUrl();
+      if (!fid) { log(t('monitorNoMod'), 'fail'); return; }
+      await copyToClipboard(fid);
+      log(t('copiedId', { id: fid }), 'info');
+    } else {
+      const aid = getAppId();
+      if (!aid) { log(t('monitorNoAppid'), 'fail'); return; }
+      await copyToClipboard(aid);
+      log(t('copiedId', { id: aid }), 'info');
+    }
   }
 
   /* ---------- 页面扫描 ---------- */
@@ -654,6 +684,8 @@
       begin(state.mode, false, items);
     });
     Panel.on('exportLog', exportLog);
+    Panel.on('monitorTarget', monitorTarget);
+    Panel.setMonitorLabel(pageKind() === 'mod' ? 'monitorMod' : 'monitorGame');
 
     // 初始化：恢复日志 → 检测登录态并明示 → 加载设置 → 恢复跨页任务 → 后台静默检查更新
     loadLog()

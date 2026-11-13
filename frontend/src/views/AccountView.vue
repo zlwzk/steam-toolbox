@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../api'
 import { useMsg } from '../useMsg'
 
@@ -28,10 +28,23 @@ const LANG_OPTIONS = [
 const form = ref({ api_key: '', steamid: '', cc: 'cn', lang: 'schinese' })
 const ownedCount = ref(0)
 const status = ref({ has_key: false, has_steamid: false, profile_exists: false })
+const loginState = ref({ state: 'idle', message: '', browser: '' })
 const { msg, ok, err, errText } = useMsg()
 const testing = ref(false)
 const saving = ref(false)
+const loggingIn = ref(false)
+let loginTimer = null
 const STEAMID_RE = /^\d{16,18}$/
+
+const LOGIN_STATE_LABEL = {
+  idle: '未打开',
+  starting: '正在启动浏览器…',
+  ready: '等待在窗口中登录 Steam',
+  logged_in: '已检测到登录，登录态已留存本机',
+  closed: '登录窗口已关闭',
+  blocked: '登录被拦截',
+  error: '启动失败',
+}
 
 function normalizeForm() {
   form.value = {
@@ -125,7 +138,46 @@ async function test() {
     testing.value = false
   }
 }
-</script>
+
+async function openLogin() {
+  loggingIn.value = true
+  try {
+    const r = await api.login()
+    if (!r.ok) {
+      err(r.error || '无法打开登录窗口')
+      loggingIn.value = false
+      return
+    }
+    ok('浏览器登录窗口已打开，请在窗口中完成 Steam 登录')
+    pollLogin()
+  } catch (e) {
+    err('打开登录窗口失败：' + errText(e))
+    loggingIn.value = false
+  }
+}
+
+function pollLogin() {
+  if (loginTimer) clearInterval(loginTimer)
+  loginTimer = setInterval(async () => {
+    try {
+      const s = await api.loginStatus()
+      loginState.value = s
+      if (['logged_in', 'closed', 'error', 'blocked'].includes(s.state)) {
+        clearInterval(loginTimer)
+        loginTimer = null
+        loggingIn.value = false
+        if (s.state === 'logged_in') {
+          ok(s.message || '登录成功，登录态已留存本机')
+          await refreshStatus()
+        } else if (s.state === 'error') {
+          err(s.message || '浏览器启动失败')
+        }
+      }
+    } catch { /* 静默 */ }
+  }, 2000)
+}
+
+onUnmounted(() => { if (loginTimer) clearInterval(loginTimer) })</script>
 
 <template>
   <div class="card">
@@ -150,9 +202,16 @@ async function test() {
         <span class="step-dot">{{ status.profile_exists ? '✓' : '3' }}</span>
         <div>
           <div class="step-name">浏览器登录态</div>
-          <div class="step-sub">{{ status.profile_exists ? '本机已留存登录态' : '首次领取时在弹出窗口登录一次' }}</div>
+          <div class="step-sub">{{ status.profile_exists ? '本机已留存登录态' : (LOGIN_STATE_LABEL[loginState.state] || '首次领取时在弹出窗口登录一次') }}</div>
         </div>
       </div>
+    </div>
+
+    <div class="row" style="align-items:center; gap:12px; margin:8px 0;">
+      <button class="ghost" :disabled="loggingIn" @click="openLogin">
+        {{ loggingIn ? '等待登录…' : '打开浏览器登录 Steam' }}
+      </button>
+      <span class="muted">{{ loginState.message || '' }}</span>
     </div>
 
     <p class="muted">使用你自己的 Steam Web API Key 拉取游戏库；Key 仅保存在本机数据库，不上传。</p>

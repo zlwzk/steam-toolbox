@@ -119,10 +119,14 @@
     els.retry = btn('retryFailed', t('retryFailed'));
     row2.append(els.pause, els.cancel, els.retry);
 
+    const row3 = el('div', 'wbs-btn-row');
+    els.monitor = btn('monitorTarget', t('monitorGame'));
+    row3.append(els.monitor);
+
     els.log = el('div', 'wbs-log');
 
     els.settings = el('div', 'wbs-settings');
-    body.append(statusLine, track, row1, rangeRow, row2, els.log, els.settings);
+    body.append(statusLine, track, row1, rangeRow, row2, row3, els.log, els.settings);
 
     const footer = el('div', 'wbs-footer', t('disclaimer'));
 
@@ -261,6 +265,9 @@
     setMode(mode) {
       els.mode.textContent = t(mode === 'unsubscribe' ? 'modeUnsubscribe' : 'modeSubscribe');
       els.mode.classList.toggle('wbs-mode-unsub', mode === 'unsubscribe');
+    },
+    setMonitorLabel(key) {
+      els.monitor.textContent = t(key);
     },
     setPauseLabel(paused) {
       els.pause.textContent = paused ? t('resume') : t('pause');

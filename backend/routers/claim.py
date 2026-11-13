@@ -60,7 +60,11 @@ def export_records(limit: int = 1000):
 @router.post("/login")
 def login():
     try:
-        claimer.open_login_window()
-        return {"ok": True}
+        return claimer.open_login_window()
     except claimer.ClaimError as exc:
         return {"ok": False, "error": str(exc)}
+
+
+@router.get("/login/status")
+def login_status():
+    return claimer.get_login_status()
