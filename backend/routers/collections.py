@@ -53,8 +53,7 @@ def status():
     backup = engine.last_backup(engine.cloudstorage_dir(account)) if account else None
     return {
         "steam": steam,
-        "accounts": [{"accountid": a["accountid"], "name": a["name"],
-                      "steamid64": a["steamid64"]} for a in accounts],
+        "accounts": [{"accountid": a["accountid"], "name": a["name"]} for a in accounts],
         "running": engine.steam_running(),
         "backup": backup,
     }
