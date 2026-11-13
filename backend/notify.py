@@ -8,7 +8,7 @@ import datetime as dt
 
 import requests
 
-from . import database
+from . import ca_store, database
 
 
 def _verify() -> bool:
@@ -23,6 +23,6 @@ def notify(title: str, content: str) -> None:
         return
     payload = {"title": title, "content": content, "ts": dt.datetime.now().isoformat(timespec="seconds")}
     try:
-        requests.post(url, json=payload, timeout=10, verify=_verify())
+        requests.post(url, json=payload, timeout=10, verify=ca_store.verify_argument(_verify()))
     except Exception:  # noqa: BLE001 - 通知失败不阻断主流程
         pass

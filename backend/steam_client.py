@@ -16,7 +16,8 @@ from requests.exceptions import (
     Timeout,
 )
 
-from . import config, database, logstore
+from . import ca_store, config, database, logstore
+from .throttler import Throttler
 
 
 class SteamApiError(Exception):
@@ -54,7 +55,7 @@ class SteamClient:
         self.cc = cc or config.DEFAULT_CC
         self.lang = lang or config.DEFAULT_LANG
         self.session = requests.Session()
-        self.session.verify = verify_ssl
+        self.session.verify = ca_store.verify_argument(verify_ssl)
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                           "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -91,42 +92,62 @@ class SteamClient:
     def _do_get(self, url: str, params: dict):
         return self.session.get(url, params=params, timeout=20)
 
+    # 可在内层瞬时重试的状态码：429 限流与 5xx 网关错误；401/403 属鉴权/授权，重试无意义。
+    _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+    _INNER_RETRIES = 2  # 初次 + 2 次瞬时重试
+
     def _get_json(self, url: str, params: dict):
         resp = None
-        for attempt in range(3):  # 初次 + 2 次瞬时网络错误重试
+        for attempt in range(self._INNER_RETRIES + 1):
             try:
                 resp = self._do_get(url, params)
-                break
             except SSLError as exc:
                 raise SteamApiError(
                     "SSL 证书校验失败：请先检查系统时间、代理证书及受信任的根证书。"
                     "如需自行承担安全风险，可在高级设置中显式关闭证书校验。"
                 ) from exc
             except (ConnectTimeout, ReqConnError, Timeout):
-                if attempt < 2:
+                if attempt < self._INNER_RETRIES:
                     time.sleep(1.5 * (attempt + 1))
                     continue
                 raise SteamApiError(
                     "无法连接 Steam：网络不通、被防火墙拦截或需要代理，或连接超时，请稍后重试"
                 )
 
-        if resp.status_code == 429:
-            raw = resp.headers.get("Retry-After")
-            retry_after = float(raw) if raw and raw.isdigit() else None
-            raise RateLimited(retry_after)
-        if resp.status_code == 401:
-            raise SteamApiError("API Key 无效或已失效，请重新到 Steam 申请 Key 后保存", 401)
-        if resp.status_code == 403:
-            if "store.steampowered.com" in url:
-                raise StoreBlocked(
-                    "商店接口被当前网络 / 地区拦截（403 Access Denied）：请检查网络、"
-                    "切换可用代理或更换网络后重试；官方账号接口不受影响"
-                )
-            raise SteamApiError("无权访问该账号资料：请检查 SteamID 是否正确、账号资料是否私密，或 Key 权限是否足够", 403)
-        try:
-            resp.raise_for_status()
-        except HTTPError:
-            raise SteamApiError(f"Steam 接口返回错误（HTTP {resp.status_code}）", resp.status_code)
+            status = resp.status_code
+
+            if status == 429:
+                raw = resp.headers.get("Retry-After")
+                retry_after = float(raw) if raw and raw.isdigit() else None
+                if attempt < self._INNER_RETRIES:
+                    wait = Throttler.compute_backoff(attempt, retry_after)
+                    logstore.add("WARN", f"命中 429 限流，内层退避 {wait:.0f}s 后重试")
+                    time.sleep(wait)
+                    continue
+                raise RateLimited(retry_after)
+
+            if status == 401:
+                raise SteamApiError("API Key 无效或已失效，请重新到 Steam 申请 Key 后保存", 401)
+            if status == 403:
+                if "store.steampowered.com" in url:
+                    raise StoreBlocked(
+                        "商店接口被当前网络 / 地区拦截（403 Access Denied）：请检查网络、"
+                        "切换可用代理或更换网络后重试；官方账号接口不受影响"
+                    )
+                raise SteamApiError("无权访问该账号资料：请检查 SteamID 是否正确、账号资料是否私密，或 Key 权限是否足够", 403)
+
+            if status in self._RETRYABLE_STATUS:
+                if attempt < self._INNER_RETRIES:
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                raise SteamApiError(f"Steam 接口返回错误（HTTP {status}）", status)
+
+            try:
+                resp.raise_for_status()
+            except HTTPError:
+                raise SteamApiError(f"Steam 接口返回错误（HTTP {resp.status_code}）", resp.status_code)
+            break
+
         try:
             return resp.json()
         except ValueError:

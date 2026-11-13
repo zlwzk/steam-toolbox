@@ -305,6 +305,11 @@ def run_check() -> dict:
 
 def _check_worker() -> None:
     client = SteamClient.from_settings()
+    thr = Throttler(ThrottleConfig(
+        delay_min=float(database.get_setting("fetch_delay_min", config.FETCH_DELAY_MIN)),
+        delay_max=float(database.get_setting("fetch_delay_max", config.FETCH_DELAY_MAX)),
+        max_retries=int(database.get_setting("max_retries", config.MAX_RETRIES)),
+    ))
     counts = {"game_update": 0, "mod_new": 0, "mod_update": 0, "rule_hit": 0,
               "subscribed": 0, "failed": 0}
     games = database.list_watch_games()
@@ -313,9 +318,11 @@ def _check_worker() -> None:
     logstore.add("INFO", f"监控检测开始：关注游戏 {len(games)} 个，关注 Mod {len(database.list_watch_mods())} 个")
 
     try:
+        limited_streak = 0
         for game in games:
             if monitor_progress["state"] != "running":
                 break
+            thr.gate()
             _update(current=monitor_progress["current"] + 1,
                     message=f"正在检测游戏 #{game['appid']}")
             try:
@@ -327,14 +334,23 @@ def _check_worker() -> None:
                         counts[e["kind"]] = counts.get(e["kind"], 0) + 1
                         if e["action"] == "rule_hit":
                             counts["rule_hit"] += 1
-            except (RateLimited, StoreBlocked) as exc:
+                limited_streak = 0
+            except RateLimited as exc:
+                limited_streak += 1
+                if limited_streak >= 2:
+                    logstore.add("WARN", f"监控连续限流，检测受阻：{exc}")
+                    _update(state="blocked", message=f"检测受阻：{exc}", finished_at=_now())
+                    return
+                wait = thr.backoff(0, exc.retry_after)
+                logstore.add("WARN", f"监控命中限流，退避 {wait:.0f}s 后继续")
+            except StoreBlocked as exc:
                 logstore.add("WARN", f"监控检测受阻：{exc}")
                 _update(state="blocked", message=f"检测受阻：{exc}", finished_at=_now())
                 return
             except SteamApiError as exc:
                 logstore.add("WARN", f"监控检测异常（AppID {game['appid']}）：{exc}")
-            time.sleep(0.5)
 
+        thr.gate()
         for e in _detect_watch_mods(client):
             counts[e["kind"]] = counts.get(e["kind"], 0) + 1
 
@@ -398,15 +414,8 @@ def _subscribe_worker() -> None:
     headless = s.get("claim_headless", "false").lower() == "true"
     channel_pref = s.get("browser_channel", "msedge")
 
-    with _sub_lock:
-        items = list(_sub_queue)
-        _sub_queue.clear()
-
-    if not items:
-        return
-
     counts = {"subscribed": 0, "failed": 0}
-    _update(state="running", total=len(items), current=0, message="正在订阅监控命中的 Mod…",
+    _update(state="running", total=0, current=0, message="正在订阅监控命中的 Mod…",
             counts={**monitor_progress["counts"], **counts})
 
     with sync_playwright() as pw:
@@ -418,33 +427,41 @@ def _subscribe_worker() -> None:
             return
 
         try:
-            page = context.pages[0] if context.pages else context.new_page()
-            for idx, it in enumerate(items, start=1):
-                thr.wait_random_delay()
-                _update(current=idx, message=f"[{idx}/{len(items)}] 订阅 {it['title']}")
-                try:
-                    page.goto(f"https://steamcommunity.com/sharedfiles/filedetails/?id={it['file_id']}",
-                              wait_until="domcontentloaded", timeout=30000)
-                    page.wait_for_timeout(1000)
-                    res = page.evaluate(SUBSCRIBE_JS, {"id": str(it["file_id"]),
-                                                        "appid": str(it["appid"])})
-                    if res.get("redirected") or res.get("isHtml"):
-                        raise claimer.ClaimError("登录态失效，请重新登录 Steam")
-                    if res.get("status") == 429 or (res.get("status") or 0) >= 500:
-                        raise claimer.ClaimError(f"http {res['status']}")
-                    if res.get("success"):
-                        counts["subscribed"] += 1
-                        database.mark_watch_mod_subscribed(it["file_id"], 1)
-                        database.add_watch_event("subscribe", it["appid"], it["file_id"],
-                                                 it["title"], "已自动/手动订阅", action="subscribed")
-                        logstore.add("INFO", f"[订阅成功] {it['title']}")
-                    else:
+            processed = 0
+            while True:
+                with _sub_lock:
+                    items = list(_sub_queue)
+                    _sub_queue.clear()
+                if not items:
+                    break
+                _update(total=processed + len(items))
+                for it in items:
+                    thr.wait_random_delay()
+                    processed += 1
+                    _update(current=processed, message=f"[{processed}] 订阅 {it['title']}")
+                    try:
+                        page.goto(f"https://steamcommunity.com/sharedfiles/filedetails/?id={it['file_id']}",
+                                  wait_until="domcontentloaded", timeout=30000)
+                        page.wait_for_timeout(1000)
+                        res = page.evaluate(SUBSCRIBE_JS, {"id": str(it["file_id"]),
+                                                            "appid": str(it["appid"])})
+                        if res.get("redirected") or res.get("isHtml"):
+                            raise claimer.ClaimError("登录态失效，请重新登录 Steam")
+                        if res.get("status") == 429 or (res.get("status") or 0) >= 500:
+                            raise claimer.ClaimError(f"http {res['status']}")
+                        if res.get("success"):
+                            counts["subscribed"] += 1
+                            database.mark_watch_mod_subscribed(it["file_id"], 1)
+                            database.add_watch_event("subscribe", it["appid"], it["file_id"],
+                                                     it["title"], "已自动/手动订阅", action="subscribed")
+                            logstore.add("INFO", f"[订阅成功] {it['title']}")
+                        else:
+                            counts["failed"] += 1
+                            logstore.add("WARN", f"[订阅失败] {it['title']}：Steam 返回未成功")
+                    except Exception as exc:  # noqa: BLE001
                         counts["failed"] += 1
-                        logstore.add("WARN", f"[订阅失败] {it['title']}：Steam 返回未成功")
-                except Exception as exc:  # noqa: BLE001
-                    counts["failed"] += 1
-                    logstore.add("WARN", f"[订阅异常] {it['title']}：{exc}")
-                _update(counts={**monitor_progress["counts"], **counts})
+                        logstore.add("WARN", f"[订阅异常] {it['title']}：{exc}")
+                    _update(counts={**monitor_progress["counts"], **counts})
             _update(state="done", message="订阅完成", finished_at=_now(),
                     counts={**monitor_progress["counts"], **counts})
         finally:

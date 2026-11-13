@@ -322,19 +322,18 @@ def _fetch_many(client: SteamClient, appids: list[int], thr: Throttler,
 
     def fetch_block(chunk: list[int]):
         try:
+            # 全局节奏闸门：并发线程在此串行化请求发出时刻，避免扎堆触发限流
+            thr.gate()
             batch = client.get_appdetails_batch(chunk)
-            # 未命中缓存才施加批间随机间隔；整批命中缓存则不等待
-            if not client.last_cache_hit:
-                thr.wait_random_delay()
-            return chunk, batch, None, None
+            return chunk, batch, client.last_cache_hit, None
         except StoreBlocked as exc:
-            return chunk, None, None, ("blocked", str(exc))
+            return chunk, None, False, ("blocked", str(exc))
         except RateLimited:
             raise  # 限流需全局退避，不在批次层隔离
         except SteamApiError as exc:
-            return chunk, None, None, ("err", str(exc))
+            return chunk, None, False, ("err", str(exc))
         except Exception as exc:  # noqa: BLE001 - 单批异常隔离，避免整批中断
-            return chunk, None, None, ("err", f"详情拉取异常：{exc}")
+            return chunk, None, False, ("err", f"详情拉取异常：{exc}")
 
     done = 0
     failed = 0
@@ -342,7 +341,7 @@ def _fetch_many(client: SteamClient, appids: list[int], thr: Throttler,
     with ThreadPoolExecutor(max_workers=_concurrency()) as ex:
         futs = [ex.submit(fetch_block, b) for b in blocks]
         for fut in as_completed(futs):
-            chunk, batch, _, err = fut.result()
+            chunk, batch, hit, err = fut.result()
             if err and err[0] == "blocked":
                 blocked_blocks += 1
                 blocked += len(chunk)
@@ -364,7 +363,7 @@ def _fetch_many(client: SteamClient, appids: list[int], thr: Throttler,
                     for aid, body in (batch or {}).items():
                         results[aid] = body
             done += len(chunk)
-            on_progress(done, False)
+            on_progress(done, hit)
             _check_pause()
 
     if failed:
@@ -381,21 +380,46 @@ def _scan_worker(kind: str) -> None:
     client = SteamClient.from_settings()
     thr = _throttler_from_settings()
 
-    try:
-        if kind == "freegame":
-            _scan_free_games(client, thr)
-        else:
-            _scan_dlc(client, thr)
-    except RateLimited as exc:
-        wait = thr.backoff(0, exc.retry_after)
-        _update(state="error", message=f"被 Steam 限流，已等待 {wait:.0f}s 后仍中断，请稍后重试",
+    rounds = max(1, thr.cfg.max_retries + 1)
+    limited: RateLimited | None = None
+
+    for round_no in range(rounds):
+        try:
+            if kind == "freegame":
+                _scan_free_games(client, thr)
+            else:
+                _scan_dlc(client, thr)
+            limited = None
+            break
+        except RateLimited as exc:
+            limited = exc
+            if round_no >= rounds - 1:
+                break
+            wait = thr.backoff(round_no, exc.retry_after)
+            logstore.add("WARN", f"被 Steam 限流，退避 {wait:.0f}s 后自动续扫（第 {round_no + 1}/{rounds} 轮）")
+            _update(state="running", message=f"被限流，退避 {wait:.0f}s 后自动续扫…")
+        except StoreBlocked as exc:
+            _update(state="error", message=f"商店接口被拦截：{exc}", finished_at=_now())
+            _persist_state("error", kind)
+            notify.notify("盘点失败", f"[{kind}] {progress['message']}")
+            return
+        except SteamApiError as exc:
+            _update(state="error", message=f"账号/接口错误：{exc}", finished_at=_now())
+            _persist_state("error", kind)
+            notify.notify("盘点失败", f"[{kind}] {progress['message']}")
+            return
+        except Exception as exc:  # noqa: BLE001 - 顶层兜底，落库为错误状态
+            _update(state="error", message=f"扫描异常：{exc}", finished_at=_now())
+            _persist_state("error", kind)
+            notify.notify("盘点失败", f"[{kind}] {progress['message']}")
+            return
+
+    if limited is not None:
+        _update(state="error", message="被 Steam 限流，多次退避后仍中断，请稍后手动重试",
                 finished_at=_now())
-    except StoreBlocked as exc:
-        _update(state="error", message=f"商店接口被拦截：{exc}", finished_at=_now())
-    except SteamApiError as exc:
-        _update(state="error", message=f"账号/接口错误：{exc}", finished_at=_now())
-    except Exception as exc:  # noqa: BLE001 - 顶层兜底，落库为错误状态
-        _update(state="error", message=f"扫描异常：{exc}", finished_at=_now())
+        _persist_state("error", kind)
+        notify.notify("盘点失败", f"[{kind}] {progress['message']}")
+        return
 
     if progress["state"] == "done":
         _persist_state("done", kind)

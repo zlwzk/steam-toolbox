@@ -333,8 +333,8 @@ def _worker(appid: str, mode: str, auto: bool, range_start: int, range_end: int)
                                 reason = str(exc)
                                 break
                             retries = attempt + 1
-                            wait = min(30 * (2 ** attempt), 300)
-                            logstore.add("INFO", f"限流退避 {wait}s：{item['title']}")
+                            wait = Throttler.compute_backoff(attempt)
+                            logstore.add("INFO", f"限流退避 {wait:.0f}s：{item['title']}")
                             if not _sleep_interruptible(wait):
                                 break
                         except Exception as exc:  # noqa: BLE001
