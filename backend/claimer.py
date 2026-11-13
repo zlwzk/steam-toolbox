@@ -286,21 +286,35 @@ def _record(item: dict, status: str, reason: str, screenshot: str | None, retrie
         )
 
 
-def start_claim(items: list[dict]) -> None:
-    if claim_progress["state"] == "running":
-        return
-    database.save_claim_queue(items)
-    threading.Thread(target=_claim_worker, args=(items,), daemon=True).start()
+def start_claim(items: list[dict]) -> bool:
+    """Reserve the in-memory running state before spawning a worker."""
+    with _lock:
+        if claim_progress["state"] == "running":
+            return False
+        claim_progress["state"] = "running"
+    try:
+        database.save_claim_queue(items)
+        threading.Thread(target=_claim_worker, args=(items,), daemon=True).start()
+    except Exception:
+        _update(state="error", message="启动领取任务失败", finished_at=_now())
+        raise
+    return True
 
 
 def resume_claim() -> dict:
     """续跑上次中断队列：跳过已成功/已在库项，返回是否启动。"""
-    if claim_progress["state"] == "running":
-        return {"ok": False, "error": "领取正在进行中"}
     remaining = _resumable_items()
     if not remaining:
         return {"ok": False, "error": "没有待领取的条目"}
-    threading.Thread(target=_claim_worker, args=(remaining,), daemon=True).start()
+    with _lock:
+        if claim_progress["state"] == "running":
+            return {"ok": False, "error": "领取正在进行中"}
+        claim_progress["state"] = "running"
+    try:
+        threading.Thread(target=_claim_worker, args=(remaining,), daemon=True).start()
+    except Exception:
+        _update(state="error", message="继续领取任务失败", finished_at=_now())
+        raise
     return {"ok": True, "count": len(remaining)}
 
 

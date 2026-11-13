@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from .. import database, scheduler
+from ..settings_validation import EDITABLE_KEYS, validate_settings
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -16,17 +17,17 @@ class SettingsPayload(BaseModel):
 @router.get("")
 def get_settings():
     s = database.get_settings()
-    # API Key 不下发到前端（账号页仅用 has_key 布尔判断），避免明文出现在页面/内存表单
-    s.pop("api_key", None)
-    return s
+    # Only expose settings controlled by this page; hide private/internal keys.
+    return {k: v for k, v in s.items() if k in EDITABLE_KEYS}
 
 
 @router.put("")
 def update_settings(payload: SettingsPayload):
-    database.update_settings(payload.data)
+    existing = database.get_settings()
+    updates = validate_settings(payload.data, existing)
+    database.update_settings(updates)
     s = database.get_settings()
-    s.pop("api_key", None)  # 与 GET 保持一致：API Key 不下发到前端
-    return {"ok": True, "settings": s}
+    return {"ok": True, "settings": {k: v for k, v in s.items() if k in EDITABLE_KEYS}}
 
 
 @router.get("/scheduler-status")

@@ -55,7 +55,6 @@ class SteamClient:
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
             "Referer": "https://store.steampowered.com/",
         })
-        self._ssl_fallback = False
         self._local = threading.local()
 
     @property
@@ -91,16 +90,11 @@ class SteamClient:
             try:
                 resp = self._do_get(url, params)
                 break
-            except SSLError:
-                # 本机证书链缺少受信根 CA：自动降级为不校验重试一次，避免用户手动改设置
-                if self.session.verify:
-                    self.session.verify = False
-                    self._ssl_fallback = True
-                    resp = self._do_get(url, params)
-                    break
+            except SSLError as exc:
                 raise SteamApiError(
-                    "SSL 证书校验失败：本机缺少受信任的根证书，可在「速率设置」中关闭『校验 SSL 证书』后重试"
-                )
+                    "SSL 证书校验失败：请先检查系统时间、代理证书及受信任的根证书。"
+                    "如需自行承担安全风险，可在高级设置中显式关闭证书校验。"
+                ) from exc
             except (ConnectTimeout, ReqConnError, Timeout):
                 if attempt < 2:
                     time.sleep(1.5 * (attempt + 1))

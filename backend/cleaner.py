@@ -126,21 +126,31 @@ def clear_items() -> None:
 # ---------- 分析（干跑） ----------
 
 def analyze(rule: dict) -> dict:
-    if cleaner_progress["state"] == "running":
-        return {"ok": False, "error": "分析正在进行中"}
-    threading.Thread(target=_worker, args=(rule,), daemon=True).start()
+    with _lock:
+        if cleaner_progress["state"] == "running":
+            return {"ok": False, "error": "分析正在进行中"}
+        cleaner_progress["state"] = "running"
+    try:
+        threading.Thread(target=_worker, args=(rule,), daemon=True).start()
+    except Exception:
+        _update(state="error", message="启动分析任务失败", finished_at=_now())
+        raise
     return {"ok": True}
 
 
-def _classify(details: dict | None) -> dict:
+def _classify(details: dict | None, appid: int) -> dict:
+    """Unknown store details are not proof of delisting or zero purchase price."""
     po = (details or {}).get("price_overview") or {}
     return {
-        "delisted": 1 if details is None else 0,
-        "paid": bool(po and (po.get("final_price") or 0) > 0),
+        "delisted": 0,  # Requires independent evidence; no details may mean a network failure.
+        "details_known": details is not None,
+        "price_known": ("initial" in po or "initial_price" in po) and ("final" in po or "final_price" in po) or (details or {}).get("is_free") is True,
+        "paid": bool(po and ((po.get("initial") or po.get("initial_price") or 0) > 0
+                             or (po.get("final") or po.get("final_price") or 0) > 0)),
         "app_type": (details or {}).get("type", "") or "",
-        "price_initial": po.get("initial_price"),
-        "price_final": po.get("final_price"),
-        "cover": SteamClient.pick_cover(0, (details or {}).get("header_image"), None),
+        "price_initial": po.get("initial", po.get("initial_price")),
+        "price_final": po.get("final", po.get("final_price")),
+        "cover": SteamClient.pick_cover(appid, (details or {}).get("header_image"), None),
     }
 
 
@@ -181,17 +191,23 @@ def _worker(rule: dict) -> None:
     for g in games:
         appid = g["appid"]
         details = details_map.get(appid)
-        meta = _classify(details)
+        meta = _classify(details, appid)
         playtime = g.get("playtime_forever", 0) or 0
 
         # 收藏 / 忽略条目直接保留，不纳入候选
         existing = _existing_flags(appid)
         if existing.get("favorite") or existing.get("ignored"):
             status, reason = "kept", "已标记收藏/忽略，跳过"
+        elif not meta["details_known"]:
+            status, reason = "kept", "商店详情缺失不能确认价格或下架状态，安全排除"
         else:
-            # 付费保护
-            if meta["paid"] and not include_paid:
+            # Never treat a failed lookup or absent price as a confirmed free license.
+            if not meta["price_known"] and not include_paid:
+                status, reason = "kept", "价格未知，默认保护账号中的游戏"
+            elif meta["paid"] and not include_paid:
                 status, reason = "kept", "付费购入，默认排除（防误删）"
+            elif delisted_policy == "only" and not meta["delisted"]:
+                status, reason = "kept", "未能确认游戏已下架，按规则排除"
             elif meta["delisted"] and delisted_policy == "exclude":
                 status, reason = "kept", "已下架/绝版，按规则排除"
             elif meta["delisted"] and delisted_policy == "only":
@@ -214,7 +230,7 @@ def _worker(rule: dict) -> None:
             "delisted": meta["delisted"],
             "status": status,
             "reason": reason,
-            "cover_url": None if appid == 0 else SteamClient.fallback_header(appid),
+            "cover_url": meta["cover"],
         }
         _upsert(item)
         counts[status] = counts.get(status, 0) + 1

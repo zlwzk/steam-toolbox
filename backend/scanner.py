@@ -120,8 +120,8 @@ def evaluate_dlc(data: dict | None, parent_appids: list[int] | set[int],
     if po is None:
         pass
     else:
-        initial = po.get("initial_price", 0) or 0
-        final = po.get("final_price", 0) or 0
+        initial = po.get("initial", po.get("initial_price", 0)) or 0
+        final = po.get("final", po.get("final_price", 0)) or 0
         if final == 0 and initial > 0:
             return "skipped", "限时 -100% 折扣，非永久免费"
         if final > 0:
@@ -131,7 +131,7 @@ def evaluate_dlc(data: dict | None, parent_appids: list[int] | set[int],
     if not any(p in owned_appids for p in parent_appids):
         return "skipped", "本体未拥有"
 
-    if po is None:
+    if (not po or not ({"initial", "final"} <= set(po) or {"initial_price", "final_price"} <= set(po))) and data.get("is_free") is not True:
         return "unknown", "无价格信息，需人工确认是否免费"
     return "claimable", "免费 DLC，可领取"
 
@@ -148,11 +148,11 @@ def evaluate_game(data: dict | None, owned: bool = False) -> tuple[str, str]:
         return "demo", "试玩 Demo，非完整游戏"
 
     po = data.get("price_overview")
-    if po is None:
-        return "permanent_free", "永久免费（F2P），不领取"
+    if not po or not ({"initial", "final"} <= set(po) or {"initial_price", "final_price"} <= set(po)):
+        return ("permanent_free", "永久免费（F2P），不领取") if data.get("is_free") is True else ("unknown", "缺少价格信息，待确认")
 
-    initial = po.get("initial_price", 0) or 0
-    final = po.get("final_price", 0) or 0
+    initial = po.get("initial", po.get("initial_price", 0)) or 0
+    final = po.get("final", po.get("final_price", 0)) or 0
     if final > 0:
         return "paid", f"付费游戏（{po.get('currency', '')} {final}）"
     if initial > 0 and final == 0:
@@ -199,8 +199,8 @@ def _save_dlc(dlc_appid: int, parent_appid: int, data: dict | None, status: str,
                 parent_appid,
                 (data or {}).get("name", ""),
                 (data or {}).get("type", ""),
-                po.get("initial_price"),
-                po.get("final_price"),
+                po.get("initial", po.get("initial_price")),
+                po.get("final", po.get("final_price")),
                 po.get("currency"),
                 (data or {}).get("price_overview", {}).get("cc"),
                 str((data or {}).get("supported_languages", "")),
@@ -244,8 +244,8 @@ def _save_free_game(item: dict, data: dict | None, status: str, reason: str) -> 
                 cover,
                 (data or {}).get("header_image"),
                 (data or {}).get("type", ""),
-                po.get("initial_price"),
-                po.get("final_price"),
+                po.get("initial", po.get("initial_price")),
+                po.get("final", po.get("final_price")),
                 po.get("currency"),
                 po.get("discount_percent"),
                 str((data or {}).get("supported_languages", "")),
@@ -261,14 +261,22 @@ def _save_free_game(item: dict, data: dict | None, status: str, reason: str) -> 
 
 # ---------- 扫描调度 ----------
 
-def run_scan(kind: str = "dlc", force: bool = False) -> None:
-    if progress["state"] in ("running", "paused"):
-        return
-    if force:
-        database.clear_cache()
-    _pause_event.set()
-    _persist_state("running", kind)
-    threading.Thread(target=_scan_worker, args=(kind,), daemon=True).start()
+def run_scan(kind: str = "dlc", force: bool = False) -> bool:
+    """Start once even when the UI submits multiple requests quickly."""
+    with _lock:
+        if progress["state"] in ("running", "paused"):
+            return False
+        progress["state"] = "running"
+    try:
+        if force:
+            database.clear_cache()
+        _pause_event.set()
+        _persist_state("running", kind)
+        threading.Thread(target=_scan_worker, args=(kind,), daemon=True).start()
+    except Exception:
+        _update(state="error", message="启动扫描失败", finished_at=_now())
+        raise
+    return True
 
 
 def get_overview() -> dict:

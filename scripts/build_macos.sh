@@ -22,5 +22,5 @@ echo "==> 4/5 PyInstaller 打包"
 python -m PyInstaller SteamToolbox.spec --distpath packaged --workpath build --noconfirm --clean
 
 echo "==> 5/5 完成"
-echo "产物目录：packaged/SteamToolbox/"
-echo "双击其中的可执行文件（或 .app）启动；浏览器首次登录建议保持有头模式。"
+echo "产物位置：packaged/SteamToolbox（单文件）；在 macOS 上生成，不能 Windows 交叉编译"
+echo "双击可执行文件启动；浏览器首次登录建议保持有头模式。"

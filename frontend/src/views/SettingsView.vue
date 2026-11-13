@@ -151,8 +151,8 @@ async function save() {
       <div class="field">
         <label>校验 SSL 证书</label>
         <select v-model="form.verify_ssl">
-          <option value="false">关闭（默认；本机缺受信 CA 时避免握手失败）</option>
-          <option value="true">开启（网络环境证书链完整时可用）</option>
+          <option value="true">开启（默认，推荐）</option>
+          <option value="false">关闭（不安全，仅在了解风险时使用）</option>
         </select>
       </div>
       <div class="field">

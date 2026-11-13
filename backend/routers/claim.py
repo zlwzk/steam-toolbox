@@ -24,7 +24,9 @@ def start_claim(payload: ClaimPayload):
     items = [i.model_dump() for i in payload.items]
     if not items:
         return {"ok": False, "error": "未选择可领取条目"}
-    claimer.start_claim(items)
+    started = claimer.start_claim(items)
+    if not started:
+        return {"ok": False, "error": "领取任务正在进行中"}
     return {"ok": True, "count": len(items)}
 
 

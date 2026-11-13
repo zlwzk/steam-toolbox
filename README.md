@@ -37,13 +37,13 @@
 ## 技术栈
 - 后端：Python · FastAPI · SQLite（标准库 sqlite3，无 ORM）· Playwright · requests
 - 前端：Vue 3 · Vite
-- 打包：PyInstaller（one-folder），浏览器复用本机 Edge / Chrome，不打包浏览器二进制
+- 打包：PyInstaller（one-file 单 EXE），浏览器复用本机 Edge / Chrome，不打包浏览器二进制
 
 ## 交付形态
 
 | 形态 | Windows | macOS | 覆盖功能 |
 |---|---|---|---|
-| 桌面版 | Release 提供预编译 zip | 需在 macOS 上从源码构建（见 `docs/BUILD.md`） | DLC/喜加一领取、工坊订阅、库清理 |
+| 桌面版 | Release 提供 Windows 单文件 exe | 需在 macOS 上从源码构建（见 `docs/BUILD.md`） | DLC/喜加一领取、工坊订阅、库清理 |
 | 浏览器插件（MV3） | ✅ Chrome / Edge | ✅ Chrome / Edge | 仅工坊批量订阅 / 退订 |
 
 - 插件源码与安装说明：[`extension/`](extension/README.md)
@@ -66,12 +66,14 @@ npm run dev        # Vite 5173，代理 /api 到 8000
 生产模式：先 `cd frontend && npm run build`，再启动后端，FastAPI 会直接托管 `frontend/dist`。
 
 ## 打包（Windows / macOS）
+
+Windows 推荐执行 `powershell -ExecutionPolicy Bypass -File scripts/build_windows.ps1`，自动先测试再构建并输出 SHA-256。
 ```bash
 cd frontend && npm install && npm run build
 cd ..
 python -m PyInstaller SteamToolbox.spec --distpath packaged --workpath build --noconfirm
 ```
-Windows 产物：`packaged/SteamToolbox/SteamToolbox.exe`；macOS 在 Mac 上执行同一 spec，详见 [`docs/BUILD.md`](docs/BUILD.md)。双击启动本地后端并自动打开页面；无控制台窗口，运行日志在页面底部「运行日志」面板查看。
+Windows 产物：`packaged/SteamToolbox.exe`；macOS 在 Mac 上执行同一 spec，详见 [`docs/BUILD.md`](docs/BUILD.md)。双击启动本地后端并自动打开页面；无控制台窗口，运行日志在页面底部「运行日志」面板查看。
 
 ## 目录与隐私
 - `data/`：本机数据库、浏览器登录 Profile、截图，**仅本地保存，已被 .gitignore 排除，不进仓库、不进打包附件**
