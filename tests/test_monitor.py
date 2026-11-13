@@ -149,3 +149,38 @@ def test_add_game_rejects_bad_appid(isolated_db):
 def test_login_status_initial_idle():
     status = claimer.get_login_status()
     assert status["state"] in ("idle", "starting", "ready", "logged_in", "closed", "blocked", "error")
+
+
+class _FakeWorkshopClient:
+    """只读假客户端：返回预置工坊列表，不发起真实网络请求。"""
+
+    def __init__(self, items):
+        self._items = items
+
+    def query_workshop(self, appid, num_per_page=20, cursor=None):
+        return {"items": self._items}
+
+
+def test_workshop_first_run_baseline_records_no_events(isolated_db):
+    database.upsert_watch_game(730, name="CS2")
+    items = [
+        {"file_id": 111, "time_updated": 1000, "title": "Mod A", "tags": ["map"]},
+        {"file_id": 222, "time_updated": 2000, "title": "Mod B", "tags": []},
+    ]
+    events = monitor._detect_workshop(_FakeWorkshopClient(items), database.get_watch_game(730))
+    # 首次建档只存基线，不把首屏 Mod 误报为新上架
+    assert events == []
+    snap = database.get_watch_game(730)
+    assert snap["last_workshop_top"]
+
+    # 第二次检测：出现一个新 Mod、一个有更新的旧 Mod
+    items2 = [
+        {"file_id": 111, "time_updated": 1500, "title": "Mod A", "tags": ["map"]},
+        {"file_id": 222, "time_updated": 2000, "title": "Mod B", "tags": []},
+        {"file_id": 333, "time_updated": 3000, "title": "Mod C", "tags": []},
+    ]
+    events2 = monitor._detect_workshop(_FakeWorkshopClient(items2), database.get_watch_game(730))
+    kinds = {e["kind"] for e in events2}
+    assert "mod_new" in kinds
+    assert "mod_update" in kinds
+
