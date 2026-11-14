@@ -49,15 +49,21 @@ def _persist_state(state: str) -> None:
 
 SCREENSHOT_DIR = config.DATA_DIR / "screenshots"
 
-# 领取按钮候选选择器（按优先级）
-BUTTON_SELECTORS = [
+# 免费 license 领取表单：POST 到 /freelicense/addfreelicense/，hidden 字段含 subid + sessionid
+FREE_LICENSE_FORM = "form[action*='addfreelicense']"
+
+# 显式「加入库」按钮候选（本体启动 / 直接畅玩 / 下载按钮不在此列，单独排除）
+LIBRARY_BUTTON_SELECTORS = [
     ".btn_add_to_library",
     "[data-gd-track-label='add_to_library']",
-    "a.btn_green_steamui",
-    ".game_area_purchase_game .btn_green_steamui",
 ]
-BUTTON_TEXT_PATTERN = r"添加到库|Add to Library|添加到帐户|Add to Account|添加到购物车|Add to Cart"
-BUTTON_TEXT_RE = re.compile(BUTTON_TEXT_PATTERN)
+
+# 明确不属于领取入口的链接：直接运行本体、弹出「是否已安装 Steam」提示
+NON_CLAIM_HREF_RE = re.compile(r"steam://run|ShowGotSteamModal", re.I)
+# 明确不属于领取入口的按钮文案：启动 / 畅玩 / 下载 / 安装（中文前缀可后接本体名）
+NON_CLAIM_TEXT_PREFIXES = ("启动", "畅玩", "下载", "安装")
+NON_CLAIM_TEXT_RE = re.compile(r"^(Play Now|Play|Download|Launch)\b", re.I)
+CLAIM_TEXT_RE = re.compile(r"添加到库|Add to Library|添加到帐户|Add to Account|添加到购物车|Add to Cart|加入购物车")
 CONFIRM_RE = re.compile(r"确认|Confirm|继续|Continue|添加到库")
 CART_TEXT_RE = re.compile(r"购物车|Cart")
 CHECKOUT_RE = re.compile(r"结账|Checkout|为自己购买|Purchase for myself")
@@ -163,6 +169,9 @@ def _launch_context(pw, headless: bool, channel_pref: str = "msedge"):
             if channel:
                 kwargs["channel"] = channel
             ctx = pw.chromium.launch_persistent_context(**kwargs)
+            # 统一默认超时：避免个别定位 / 取文案调用在页面异常时无限挂起，
+            # 超时抛异常后由 worker 兜底落库，而不是整队永久停在 running。
+            ctx.set_default_timeout(15000)
             # 用真实 UA 复核实际内核，防止所选渠道启动后被静默替换
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
             real_key = _detect_real_channel(page) or channel
@@ -177,21 +186,64 @@ def _launch_context(pw, headless: bool, channel_pref: str = "msedge"):
     raise ClaimError(f"无法启动浏览器：{last_err}")
 
 
+def _button_is_claimable(loc) -> bool:
+    """排除本体启动 / 直接畅玩 / 下载等非领取入口按钮。"""
+    try:
+        href = loc.get_attribute("href") or ""
+    except Exception:  # noqa: BLE001
+        href = ""
+    if NON_CLAIM_HREF_RE.search(href):
+        return False
+    try:
+        text = loc.inner_text().strip()
+    except Exception:  # noqa: BLE001
+        text = ""
+    if text.startswith(NON_CLAIM_TEXT_PREFIXES) or NON_CLAIM_TEXT_RE.match(text):
+        return False
+    return True
+
+
+def _find_free_license_form(page):
+    """定位免费 license 领取表单（addfreelicense）；不存在返回 None。"""
+    loc = page.locator(FREE_LICENSE_FORM)
+    return loc.first if loc.count() > 0 else None
+
+
 def _find_claim_button(page):
-    for selector in BUTTON_SELECTORS:
+    """在排除本体启动 / 畅玩 / 下载按钮后，定位显式「加入库 / 加购物车」按钮。"""
+    for selector in LIBRARY_BUTTON_SELECTORS:
         loc = page.locator(selector)
-        if loc.count() > 0:
-            return loc.first
-    text_btn = page.get_by_text(BUTTON_TEXT_RE)
-    if text_btn.count() > 0:
-        return text_btn.first
+        for i in range(loc.count()):
+            candidate = loc.nth(i)
+            if _button_is_claimable(candidate):
+                return candidate
+    text_btn = page.get_by_text(CLAIM_TEXT_RE)
+    for i in range(text_btn.count()):
+        candidate = text_btn.nth(i)
+        if _button_is_claimable(candidate):
+            return candidate
     return None
+
+
+def _has_direct_play_button(page) -> bool:
+    """页面是否只有直接运行 / 畅玩 / 下载入口（freeGameBtn 或 steam://run 链接）。"""
+    if page.locator("#freeGameBtn").count() > 0:
+        return True
+    if page.locator("a[href*='steam://run']").count() > 0:
+        return True
+    return False
 
 
 def _checkout_cart(page, appid: int) -> tuple[str, str] | None:
     """0 元购物车结账：购物车 → 结账 → 确认下单。返回 (status, reason)，None 表示流程走完。"""
     page.goto("https://store.steampowered.com/cart/", wait_until="domcontentloaded", timeout=30000)
     page.wait_for_timeout(1500)
+
+    # 购物车为空（免费 license 已直接入库，或本就未加购）：无需结账
+    cart_body = page.inner_text("body")
+    cart_rows = page.locator(".cart_row, #cart_items_list .cart_item, .cart_item").count()
+    if cart_rows == 0 and ("购物车为空" in cart_body or "Your cart is empty" in cart_body):
+        return None
 
     checks = page.locator("input[type='checkbox']")
     if checks.count() > 0:
@@ -224,43 +276,77 @@ def claim_one(context, item: dict, client: SteamClient, cc: str, lang: str) -> t
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(1500)
 
-        # 登录墙检测
-        if "/login" in page.url or page.get_by_text("登录 Steam").count() > 0:
+        # 登录墙检测：以账户下拉元素为准；未登录时页面可能不跳转 /login，
+        # 再结合登录入口链接 / 文案兜底识别。
+        logged_in = page.locator("#account_pulldown").count() > 0
+        if not logged_in and (
+            "/login" in page.url
+            or page.locator("a[href*='login']").count() > 0
+            or page.get_by_text("登录 Steam").count() > 0
+            or page.get_by_text("Sign in to").count() > 0
+        ):
             return "blocked", "需要先在浏览器中登录 Steam", _screenshot(page, appid)
 
-        body = page.inner_text("body")
-        if "在库中" in body or "In Library" in body:
+        # 已在库判定：以库标志为准；购买区块内的「在库中」文案为辅，
+        # 避免整页 body 里推荐位 / 其他游戏的「在库中」文字造成误判。
+        purchase_text = ""
+        purchase_block = page.locator(".game_area_purchase_game")
+        if purchase_block.count() > 0:
+            try:
+                purchase_text = purchase_block.first.inner_text()
+            except Exception:  # noqa: BLE001
+                purchase_text = ""
+        if page.locator(".package_in_library_flag").count() > 0 \
+                or "在库中" in purchase_text or "In Library" in purchase_text:
             return "skipped", "已在库中", None
 
-        button = _find_claim_button(page)
-        if button is None:
-            return "blocked", "未找到领取按钮（选择器待在真实环境校准）", _screenshot(page, appid)
-
-        btn_text = ""
-        try:
-            btn_text = button.inner_text()
-        except Exception:  # noqa: BLE001
-            btn_text = ""
-
-        if CART_TEXT_RE.search(btn_text):
-            # 需加购物车走 0 元结账
-            button.click()
+        # 1) 优先免费 license 表单（addfreelicense，字段含 subid + sessionid）
+        form = _find_free_license_form(page)
+        if form is not None:
+            submit = form.locator("button[type='submit'], .btn_add_to_library, a.btn_green_steamui").first
+            if submit.count() > 0 and _button_is_claimable(submit):
+                submit.click()
+            else:
+                # Locator 无 .submit() 方法；通过 JS 提交表单（Playwright 规范做法）
+                form.evaluate("el => el.submit()")
             page.wait_for_timeout(1500)
             blocked = _checkout_cart(page, appid)
             if blocked:
                 return blocked[0], blocked[1], _screenshot(page, appid)
         else:
-            # 直接添加到库
-            button.click()
-            page.wait_for_timeout(1500)
-            confirm = page.get_by_role("button", name=CONFIRM_RE).first
-            if confirm.count() > 0:
-                confirm.click()
+            # 2) 显式「加入库 / 加购物车」按钮（已排除本体启动 / 畅玩 / 下载）
+            button = _find_claim_button(page)
+            if button is None:
+                # 仅有直接运行 / 下载入口：内容已可直接运行或需本体，无需也无法在此领取
+                if _has_direct_play_button(page):
+                    return "skipped", "已可直接运行或需基础游戏，无可领取入口", _screenshot(page, appid)
+                return "blocked", "未找到可领取入口（选择器待校准）", _screenshot(page, appid)
+
+            btn_text = ""
+            try:
+                btn_text = button.inner_text()
+            except Exception:  # noqa: BLE001
+                btn_text = ""
+
+            if CART_TEXT_RE.search(btn_text):
+                # 需加购物车走 0 元结账
+                button.click()
                 page.wait_for_timeout(1500)
+                blocked = _checkout_cart(page, appid)
+                if blocked:
+                    return blocked[0], blocked[1], _screenshot(page, appid)
+            else:
+                # 直接添加到库
+                button.click()
+                page.wait_for_timeout(1500)
+                confirm = page.get_by_role("button", name=CONFIRM_RE).first
+                if confirm.count() > 0:
+                    confirm.click()
+                    page.wait_for_timeout(1500)
 
         shot = _screenshot(page, appid)
 
-        # 回查归属（有 Key 才回查）
+        # 回查归属（有 Key 才回查；接口不可达时不伪造成功）
         owned = False
         if client.api_key:
             try:
@@ -270,7 +356,7 @@ def claim_one(context, item: dict, client: SteamClient, cc: str, lang: str) -> t
 
         if owned:
             return "success", "已领取并确认入库", shot
-        return "success", "已点击领取（归属未回查）", shot
+        return "success", "已提交领取（归属未回查）", shot
     except Exception as exc:  # noqa: BLE001
         return "failed", f"领取异常：{exc}", _screenshot(page, appid)
     finally:
@@ -357,6 +443,12 @@ def _claim_worker(items: list[dict]) -> None:
             return
 
         try:
+            def _safe_claim(entry: dict) -> tuple[str, str, str | None]:
+                try:
+                    return claim_one(context, entry, client, cc, lang)
+                except Exception as exc:  # noqa: BLE001 - 兜底：逃逸异常也落库，避免整条静默丢失
+                    return "failed", f"领取异常：{exc}", None
+
             for idx, item in enumerate(items, start=1):
                 _update(current=idx, current_item=item.get("name") or str(item["appid"]),
                         message=f"正在领取 {idx}/{len(items)}：{item.get('name', item['appid'])}")
@@ -368,14 +460,14 @@ def _claim_worker(items: list[dict]) -> None:
                     break
 
                 thr.wait_random_delay()
-                status, reason, shot = claim_one(context, item, client, cc, lang)
+                status, reason, shot = _safe_claim(item)
 
                 # 失败按设置次数重试，指数退避；受阻（blocked）不重试，直接转人工
                 retries = 0
                 while status == "failed" and retries < max_retries:
                     retries += 1
                     thr.backoff(retries)
-                    status, reason, shot = claim_one(context, item, client, cc, lang)
+                    status, reason, shot = _safe_claim(item)
 
                 _record(item, status, reason, shot, retries)
                 logstore.add("INFO" if status == "success" else "WARN",
