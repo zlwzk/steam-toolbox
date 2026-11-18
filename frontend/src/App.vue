@@ -10,6 +10,7 @@ import WorkshopView from './views/WorkshopView.vue'
 import MonitorView from './views/MonitorView.vue'
 import CleanerView from './views/CleanerView.vue'
 import CollectionsView from './views/CollectionsView.vue'
+import WishlistView from './views/WishlistView.vue'
 import ClaimView from './views/ClaimView.vue'
 import SettingsView from './views/SettingsView.vue'
 import DashboardView from './views/DashboardView.vue'
@@ -25,6 +26,7 @@ const tabs = [
   { key: 'workshop', label: '工坊订阅' },
   { key: 'monitor', label: '更新监控' },
   { key: 'cleaner', label: '库清理' },
+  { key: 'wishlist', label: '入库 / CDK' },
   { key: 'collections', label: '库分类', pro: true },
   { key: 'claim', label: '领取记录' },
   { key: 'settings', label: '速率设置' },
@@ -38,6 +40,7 @@ const comps = {
   workshop: WorkshopView,
   monitor: MonitorView,
   cleaner: CleanerView,
+  wishlist: WishlistView,
   collections: CollectionsView,
   claim: ClaimView,
   settings: SettingsView,
