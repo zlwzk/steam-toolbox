@@ -13,6 +13,7 @@ export const VALID_TABS = [
   'workshop',
   'monitor',
   'cleaner',
+  'wishlist',
   'collections',
   'claim',
   'settings',

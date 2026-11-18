@@ -193,6 +193,29 @@ CREATE TABLE IF NOT EXISTS watch_events (
     seen INTEGER DEFAULT 0,
     action TEXT DEFAULT 'none'
 );
+
+CREATE TABLE IF NOT EXISTS wishlist_games (
+    appid INTEGER,
+    input_text TEXT,
+    resolve_status TEXT,
+    source TEXT,
+    name_en TEXT,
+    name_zh TEXT,
+    note TEXT,
+    added_at TEXT,
+    checked_at TEXT,
+    PRIMARY KEY (input_text)
+);
+
+CREATE TABLE IF NOT EXISTS cdk_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key_value TEXT UNIQUE,
+    note TEXT,
+    status TEXT DEFAULT 'pending',
+    reason TEXT,
+    added_at TEXT,
+    updated_at TEXT
+);
 """
 
 # 旧库兜底迁移：补充后加的列
@@ -578,3 +601,44 @@ def mark_events_read(event_ids: list[int] | None = None) -> int:
         else:
             cur = conn.execute("UPDATE watch_events SET seen = 1 WHERE seen = 0")
         return cur.rowcount
+
+
+# ---------- 游戏入库登记（wishlist）与 CDK 登记 ----------
+# 这两张表是独立登记表：只记录「用户想入库的游戏」与「用户登记的激活码」，
+# 不触碰 owned_games（拥有状态只能来自 Steam 官方接口）与既有功能表。
+
+def upsert_wishlist_game(appid: int, input_text: str, resolve_status: str, source: str,
+                         name_en: str | None, name_zh: str | None,
+                         note: str = "", checked_at: str | None = None) -> None:
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO wishlist_games(appid, input_text, resolve_status, source, name_en, name_zh, note, added_at, checked_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(input_text) DO UPDATE SET appid=excluded.appid, resolve_status=excluded.resolve_status, "
+            "source=excluded.source, name_en=excluded.name_en, name_zh=excluded.name_zh, "
+            "note=excluded.note, checked_at=excluded.checked_at",
+            (appid, input_text, resolve_status, source, name_en, name_zh, note,
+             now, checked_at or now),
+        )
+
+
+def list_wishlist_games() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM wishlist_games ORDER BY added_at DESC, appid"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_wishlist_game(input_text: str) -> bool:
+    with get_conn() as conn:
+        cur = conn.execute(
+            "DELETE FROM wishlist_games WHERE input_text = ?", (input_text,),
+        )
+        return cur.rowcount > 0
+
+
+def clear_wishlist_games() -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM wishlist_games")
