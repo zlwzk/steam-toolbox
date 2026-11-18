@@ -11,7 +11,9 @@ from ..steam_client import SteamApiError, SteamClient
 
 router = APIRouter(prefix="/api/account", tags=["account"])
 
-_STEAMID_RE = re.compile(r"^\d{16,18}$")
+# SteamID64 恒为 17 位纯数字（通常 7656119 开头）；与前端 AccountView.STEAMID_RE
+# 及界面文案保持同一语义，错误信息说的长度即校验的长度。
+_STEAMID_RE = re.compile(r"^\d{17}$")
 
 
 class AccountPayload(BaseModel):
@@ -91,23 +93,26 @@ def save_account(payload: AccountPayload):
 
 @router.post("/test")
 def test_account(payload: AccountPayload):
+    """测试连接：只读操作，不修改已保存设置。
+
+    识别到的商店区 / 语言只随结果返回，由前端回填未保存表单；
+    只有点击「保存」才写入数据库。
+    """
     s = database.get_settings()
     api_key = payload.api_key.strip() or s.get("api_key", "")
     steamid = payload.steamid.strip() or s.get("steamid", "")
     lang = _normalize_lang(payload.lang.strip(), s.get("lang", ""))
     verify_ssl = s.get("verify_ssl", "true").lower() != "false"
 
-    # 测试时先刷新一次账号区域，再拉取游戏库
+    # 测试时先识别一次账号区域（仅用于本次请求与前端回显，不落库）
     detected_cc, _ = _detect_cc(api_key, steamid, verify_ssl)
     cc = detected_cc or s.get("cc") or config.DEFAULT_CC
-    if detected_cc:
-        database.set_setting("cc", detected_cc)
-    database.set_setting("lang", lang)
 
     client = SteamClient(api_key, steamid, cc, lang, verify_ssl)
     try:
         games = client.get_owned_games()
-        return {"ok": True, "owned_count": len(games), "cc": cc, "lang": lang}
+        return {"ok": True, "owned_count": len(games), "cc": cc, "lang": lang,
+                "cc_detected": bool(detected_cc)}
     except SteamApiError as exc:
         return {"ok": False, "error": str(exc)}
     except Exception as exc:  # noqa: BLE001

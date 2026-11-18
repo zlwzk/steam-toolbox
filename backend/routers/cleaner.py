@@ -63,7 +63,9 @@ def clear():
 def export_csv():
     rows = cleaner.list_items()
     headers = ["AppID", "名称", "时长(分钟)", "原价", "现价", "类型", "是否下架", "状态", "理由"]
+    # delisted 当前没有可核验数据来源：0 表示「未知」而非「确认未下架」，
+    # 导出保持未知语义，不把未判定伪造成「否」。
     table = [[r["appid"], r["name"], r["playtime_forever"], r["price_initial"],
-              r["price_final"], r["app_type"], "是" if r["delisted"] else "否",
+              r["price_final"], r["app_type"], "是" if r["delisted"] else "未知",
               r["status"], r["reason"]] for r in rows]
     return exporter.csv_response("cleaner_items.csv", headers, table)

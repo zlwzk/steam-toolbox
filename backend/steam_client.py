@@ -54,16 +54,32 @@ class SteamClient:
         self.steamid = steamid.strip()
         self.cc = cc or config.DEFAULT_CC
         self.lang = lang or config.DEFAULT_LANG
-        self.session = requests.Session()
-        self.session.verify = ca_store.verify_argument(verify_ssl)
-        self.session.headers.update({
+        # requests.Session 未文档保证线程安全：盘点/监控的线程池 worker 共用同一
+        # 实例时，连接池与 cookie 状态可能相互干扰。改为每个线程一个独立 Session
+        # （配置相同），全局节奏闸门与本地缓存语义不变。
+        self._verify_ssl = ca_store.verify_argument(verify_ssl)
+        self._local = threading.local()
+
+    def _new_session(self) -> requests.Session:
+        session = requests.Session()
+        session.verify = self._verify_ssl
+        session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                           "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
             "Referer": "https://store.steampowered.com/",
         })
-        self._local = threading.local()
+        return session
+
+    @property
+    def session(self) -> requests.Session:
+        """线程本地 Session：首次访问时按当前 TLS 配置创建，之后复用。"""
+        session = getattr(self._local, "session", None)
+        if session is None:
+            session = self._new_session()
+            self._local.session = session
+        return session
 
     @property
     def last_cache_hit(self) -> bool:

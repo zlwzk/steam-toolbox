@@ -31,6 +31,12 @@ _lock = threading.Lock()
 # 暂停/继续：event set=运行，clear=暂停；worker 在断点处 wait 挂起，不丢弃已拉结果
 _pause_event = threading.Event()
 _pause_event.set()
+# 关闭中断：set 后 worker 在下一个断点中止，用于软件关闭时避免遗留运行态
+_abort_event = threading.Event()
+
+
+class ScanAborted(Exception):
+    """扫描因软件关闭而被中断。"""
 
 
 def _now() -> str:
@@ -90,12 +96,19 @@ def resume_scan() -> bool:
 
 def _check_pause() -> None:
     """断点检查：被暂停则挂起等待继续，已拉取结果保留在内存中不重拉。"""
+    if _abort_event.is_set():
+        raise ScanAborted()
     if _pause_event.is_set():
         return
     _update(state="paused", message="已暂停，等待继续…")
     _persist_state("paused", progress.get("kind"))
     _pause_event.wait()
     _update(state="running", message="继续扫描…")
+
+
+def stop_scan() -> None:
+    """请求中断进行中的扫描（软件关闭时调用）；无扫描时为空操作。"""
+    _abort_event.set()
 
 
 # ---------- 判定规则 ----------
@@ -270,6 +283,7 @@ def run_scan(kind: str = "dlc", force: bool = False) -> bool:
     try:
         if force:
             database.clear_cache()
+        _abort_event.clear()
         _pause_event.set()
         _persist_state("running", kind)
         threading.Thread(target=_scan_worker, args=(kind,), daemon=True).start()
@@ -402,6 +416,11 @@ def _scan_worker(kind: str) -> None:
             _update(state="error", message=f"商店接口被拦截：{exc}", finished_at=_now())
             _persist_state("error", kind)
             notify.notify("盘点失败", f"[{kind}] {progress['message']}")
+            return
+        except ScanAborted:
+            # 软件关闭：中断扫描并落为错误态，不伪称完成
+            _update(state="error", message="扫描已中断（软件正在关闭）", finished_at=_now())
+            _persist_state("error", kind)
             return
         except SteamApiError as exc:
             _update(state="error", message=f"账号/接口错误：{exc}", finished_at=_now())

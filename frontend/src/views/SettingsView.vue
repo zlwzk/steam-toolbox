@@ -130,6 +130,9 @@ async function save() {
     <div class="muted" v-if="sched.last_run_at">
       上次巡检：{{ sched.last_run_at }}（{{ sched.last_kind }}）｜ 预计下次：{{ sched.next_run_at || '—' }}
     </div>
+    <div class="msg msg-err" v-if="sched.last_error" style="margin-top:6px;">
+      巡检调度最近错误（{{ sched.last_error_at }}）：{{ sched.last_error }}
+    </div>
 
     <h3>通知</h3>
     <div class="row">

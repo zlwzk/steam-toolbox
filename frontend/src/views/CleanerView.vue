@@ -117,8 +117,8 @@ function badgeClass(s) {
         <label>时长条件</label>
         <select v-model="timeMode">
           <option value="never">从未玩过</option>
-          <option value="lt">小于</option>
-          <option value="gt">大于</option>
+          <option value="lt">不超过</option>
+          <option value="gt">至少</option>
           <option value="range">区间</option>
         </select>
       </div>
@@ -141,9 +141,13 @@ function badgeClass(s) {
         <label>已下架 / 绝版</label>
         <select v-model="delisted">
           <option value="keep">不排除</option>
-          <option value="exclude">排除已下架</option>
-          <option value="only">仅看已下架</option>
+          <option value="exclude" disabled>排除已下架（暂不可判定）</option>
+          <option value="only" disabled>仅看已下架（暂不可判定）</option>
         </select>
+        <span class="muted hint">
+          暂不可判定：当前没有可核验的下架数据来源，商店详情缺失不等于已下架，
+          因此「排除 / 仅看已下架」不参与筛选，避免误判；选中项会按「不排除」处理。
+        </span>
       </div>
       <label><input type="checkbox" v-model="includePaid" /> 包含付费购入（默认排除，防误删）</label>
       <button class="primary" :disabled="running" @click="analyze">{{ running ? '分析中…' : '开始分析（干跑预览）' }}</button>

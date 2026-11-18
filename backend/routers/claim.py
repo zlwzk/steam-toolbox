@@ -1,7 +1,7 @@
 """领取任务：开始领取、进度、记录、手动登录。"""
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from .. import claimer, database, exporter
@@ -41,12 +41,12 @@ def claim_progress():
 
 
 @router.get("/records")
-def records(limit: int = 200):
+def records(limit: int = Query(default=200, ge=1, le=5000)):
     return claimer.list_records(limit)
 
 
 @router.get("/export.csv")
-def export_records(limit: int = 1000):
+def export_records(limit: int = Query(default=1000, ge=1, le=5000)):
     rows = claimer.list_records(limit)
     headers = ["时间", "类型", "AppID", "状态", "理由", "重试次数", "截图"]
     table = [

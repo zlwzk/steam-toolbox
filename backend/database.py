@@ -548,6 +548,12 @@ def add_watch_event(kind: str, appid: int | None, file_id: int | None, title: st
 
 def list_watch_events(kind: str | None = None, only_unread: bool = False,
                       limit: int = 200) -> list[dict]:
+    # 数据层保护：limit 归一化到 [1, 500]，防止负数 LIMIT 在 SQLite 中等价于全表
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 200
+    limit = max(1, min(limit, 500))
     sql = "SELECT * FROM watch_events WHERE 1=1"
     args: list = []
     if kind:

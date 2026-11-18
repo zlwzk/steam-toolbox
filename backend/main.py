@@ -7,22 +7,50 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from . import config, database, logstore, monitor, scheduler, updater
+from . import config, database, logstore, monitor, scheduler, scanner, updater
 from .security import add_security_headers, reject_unsafe_request
 from .routers import account, candidates, claim, cleaner, collections, freegames, monitor as monitor_router, pro, scan, session, settings, workshop
 
-app = FastAPI(title=config.APP_NAME, version=config.APP_VERSION)
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """启动时初始化数据库与后台任务；关闭时发停止信号并等待线程安全退出。
+
+    替代 on_event(startup)：关闭阶段同样可感知，避免开发重载时遗留
+    scheduler / monitor 循环线程或残留 running 状态。
+    """
+    _setup_logging()
+    database.init_db()
+    scheduler.start()
+    monitor.start()
+    logstore.add("INFO", f"{config.APP_NAME} v{config.APP_VERSION} 已启动")
+    try:
+        yield
+    finally:
+        # 停止信号：调度循环与进行中的扫描/检测在断点中断，不伪称完成
+        try:
+            monitor.stop()
+            scheduler.stop()
+            scanner.stop_scan()
+        except Exception as exc:  # noqa: BLE001 - 停止阶段的异常不能阻断关闭流程
+            logstore.add("ERROR", f"停止后台任务时出现异常：{exc}")
+        logstore.add("INFO", "后端正在关闭：后台任务已停止")
+
+
+app = FastAPI(title=config.APP_NAME, version=config.APP_VERSION, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://[::1]:5173"],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    # DELETE 为前端监控模块移除关注项所用方法；缺失时开发模式预检会被拒
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type"],
 )
 
@@ -55,15 +83,6 @@ def _setup_logging() -> None:
     logging.getLogger("uvicorn.access").propagate = False
 
 
-@app.on_event("startup")
-def _startup() -> None:
-    _setup_logging()
-    database.init_db()
-    scheduler.start()
-    monitor.start()
-    logstore.add("INFO", f"{config.APP_NAME} v{config.APP_VERSION} 已启动")
-
-
 @app.get("/api/health")
 def health():
     return {"ok": True}
@@ -80,7 +99,7 @@ def update_check():
 
 
 @app.get("/api/logs")
-def get_logs(n: int = 300):
+def get_logs(n: int = Query(default=300, ge=1, le=1000)):
     return {"logs": logstore.get_recent(n)}
 
 

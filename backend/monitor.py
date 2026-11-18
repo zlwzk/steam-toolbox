@@ -35,6 +35,9 @@ monitor_progress: dict = {
     "finished_at": None,
 }
 _lock = threading.Lock()
+# 启动互斥锁：状态校验与 running 状态占用必须在同一把锁内完成，
+# 避免两个并发请求都通过「未在运行」检查后各自启动 worker。
+_start_lock = threading.Lock()
 _stop = threading.Event()
 _thread: threading.Thread | None = None
 
@@ -289,17 +292,27 @@ def _detect_watch_mods(client: SteamClient) -> list[dict]:
 
 
 def run_check() -> dict:
-    """启动一次后台检测；已有检测在跑时拒绝重复启动。"""
-    if monitor_progress["state"] == "running":
-        return {"ok": False, "error": "监控检测正在进行中"}
-    s = database.get_settings()
-    if not (s.get("api_key") and s.get("steamid")):
-        return {"ok": False, "error": "请先在「账号绑定」填入 API Key 与 SteamID"}
-    _update(state="running", total=0, current=0, message="正在启动监控检测…",
-            counts={"game_update": 0, "mod_new": 0, "mod_update": 0, "rule_hit": 0,
-                    "subscribed": 0, "failed": 0},
-            started_at=_now(), finished_at=None)
-    threading.Thread(target=_check_worker, daemon=True).start()
+    """启动一次后台检测；已有检测在跑时拒绝重复启动。
+
+    状态校验与 running 状态占用在同一把锁内完成（check-and-set），
+    并发请求下同一时刻也只会启动一个 worker；线程启动失败时恢复错误状态。
+    """
+    with _start_lock:
+        if monitor_progress["state"] == "running":
+            return {"ok": False, "error": "监控检测正在进行中"}
+        s = database.get_settings()
+        if not (s.get("api_key") and s.get("steamid")):
+            return {"ok": False, "error": "请先在「账号绑定」填入 API Key 与 SteamID"}
+        _update(state="running", total=0, current=0, message="正在启动监控检测…",
+                counts={"game_update": 0, "mod_new": 0, "mod_update": 0, "rule_hit": 0,
+                        "subscribed": 0, "failed": 0},
+                started_at=_now(), finished_at=None)
+        try:
+            threading.Thread(target=_check_worker, daemon=True).start()
+        except Exception as exc:  # noqa: BLE001 - 启动失败必须恢复状态，不能残留 running
+            logstore.add("ERROR", f"监控检测线程启动失败：{exc}")
+            _update(state="error", message=f"启动监控检测失败：{exc}", finished_at=_now())
+            return {"ok": False, "error": f"启动监控检测失败：{exc}"}
     return {"ok": True}
 
 
@@ -320,7 +333,7 @@ def _check_worker() -> None:
     try:
         limited_streak = 0
         for game in games:
-            if monitor_progress["state"] != "running":
+            if monitor_progress["state"] != "running" or _stop.is_set():
                 break
             thr.gate()
             _update(current=monitor_progress["current"] + 1,
@@ -349,6 +362,11 @@ def _check_worker() -> None:
                 return
             except SteamApiError as exc:
                 logstore.add("WARN", f"监控检测异常（AppID {game['appid']}）：{exc}")
+
+        if _stop.is_set():
+            # 软件关闭：中断检测并落为错误态，不伪称完成，也不残留 running
+            _update(state="error", message="监控检测随软件关闭而中断", finished_at=_now())
+            return
 
         thr.gate()
         for e in _detect_watch_mods(client):
@@ -470,6 +488,24 @@ def _subscribe_worker() -> None:
 
 # ---------- 定时巡检调度 ----------
 
+_monitor_errors: dict = {"last_error": None, "last_error_at": None}
+_monitor_errors_lock = threading.Lock()
+
+
+def get_loop_errors() -> dict:
+    """巡检循环的最近错误信息（供状态查询，错误不静默消失）。"""
+    with _monitor_errors_lock:
+        return dict(_monitor_errors)
+
+
+def _record_loop_error(exc: Exception) -> None:
+    message = f"监控巡检循环异常：{exc}"
+    logstore.add("ERROR", message)
+    with _monitor_errors_lock:
+        _monitor_errors["last_error"] = message
+        _monitor_errors["last_error_at"] = dt.datetime.now().isoformat(timespec="seconds")
+
+
 def _tick() -> None:
     enabled = database.get_setting("watch_auto", "false").lower() == "true"
     try:
@@ -490,19 +526,27 @@ def _loop() -> None:
     while not _stop.is_set():
         try:
             _tick()
-        except Exception:  # noqa: BLE001 - 调度循环不能因单次异常退出
-            pass
-        _stop.wait(60)
+        except Exception as exc:  # noqa: BLE001 - 调度循环不能因单次异常退出，但必须留痕
+            _record_loop_error(exc)
+        _stop.wait(5)
 
 
 def start() -> None:
     global _thread
-    if _thread and _thread.is_alive():
-        return
-    _stop.clear()
-    _thread = threading.Thread(target=_loop, daemon=True)
-    _thread.start()
+    with _start_lock:
+        if _thread and _thread.is_alive():
+            return
+        _stop.clear()
+        _thread = threading.Thread(target=_loop, daemon=True)
+        _thread.start()
 
 
 def stop() -> None:
+    """发出停止信号并等待循环线程退出；进行中的检测在下一个断点中断。"""
+    global _thread
     _stop.set()
+    thread = _thread
+    if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+        thread.join(timeout=6.0)
+    with _start_lock:
+        _thread = None

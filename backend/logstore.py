@@ -28,6 +28,13 @@ def add(level: str, message: str) -> None:
 
 
 def get_recent(n: int = 300) -> list[dict]:
+    # 数据层保护：非正数或越界的 n 归一化到 [1, _MAX]，
+    # 避免负数下标切片返回非预期内容（如 SQLite LIMIT 负数等价于全表）。
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        n = 300
+    n = max(1, min(n, _MAX))
     with _lock:
         return list(_buf)[-n:]
 

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { api } from './api'
+import { resolveInitialTab, readStoredTab } from './tabState'
 import AccountView from './views/AccountView.vue'
 import ScanView from './views/ScanView.vue'
 import CandidatesView from './views/CandidatesView.vue'
@@ -14,6 +15,7 @@ import SettingsView from './views/SettingsView.vue'
 import DashboardView from './views/DashboardView.vue'
 import LogPanel from './views/LogPanel.vue'
 
+const TAB_STORAGE_KEY = 'steam_dlc_tab'
 const tabs = [
   { key: 'dashboard', label: '总览' },
   { key: 'account', label: '账号绑定' },
@@ -40,7 +42,8 @@ const comps = {
   claim: ClaimView,
   settings: SettingsView,
 }
-const active = ref(localStorage.getItem('steam_dlc_tab') || 'dashboard')
+// 安全读取本地记忆的页面 key：存储不可用 / 值无效 / 数据过期时回退总览，不白屏
+const active = ref(resolveInitialTab(readStoredTab(localStorage, TAB_STORAGE_KEY)))
 const version = ref('1.3.1')
 const build = ref('')
 const session = ref({ configured: false, has_key: false, has_steamid: false, profile_exists: false })
@@ -75,8 +78,10 @@ const buildShort = computed(() => {
 })
 
 function setTab(key) {
+  // 仅接受合法组件 key，防止把无效值写回存储后下次启动白屏
+  if (!comps[key]) return
   active.value = key
-  try { localStorage.setItem('steam_dlc_tab', key) } catch { /* 存储不可用时忽略 */ }
+  try { localStorage.setItem(TAB_STORAGE_KEY, key) } catch { /* 存储不可用时忽略 */ }
 }
 
 async function loadVersion() {
@@ -200,7 +205,7 @@ onMounted(() => {
       </ol>
       <button class="primary" @click="setTab('account')">前往账号绑定 →</button>
     </div>
-    <component :is="comps[active]" @navigate="setTab" @session-refresh="loadSession" />
+    <component :is="comps[active] || comps.dashboard" @navigate="setTab" @session-refresh="loadSession" />
     <LogPanel />
   </main>
 

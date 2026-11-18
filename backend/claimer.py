@@ -499,6 +499,12 @@ def _claim_worker(items: list[dict]) -> None:
 
 
 def list_records(limit: int = 200) -> list[dict]:
+    # 数据层保护：limit 归一化到 [1, 5000]，防止负数 LIMIT 返回全表
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 200
+    limit = max(1, min(limit, 5000))
     with database.get_conn() as conn:
         rows = conn.execute(
             "SELECT * FROM claim_records ORDER BY id DESC LIMIT ?", (limit,)

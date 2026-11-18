@@ -1,7 +1,7 @@
 """更新监控接口：关注游戏 / Mod / 规则 / 事件流 / 订阅动作。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel
 
 from .. import database, monitor
@@ -125,7 +125,8 @@ def delete_rule(rule_id: int):
 # ---------- 事件流 ----------
 
 @router.get("/events")
-def events(kind: str | None = None, unread: bool = False, limit: int = 200):
+def events(kind: str | None = None, unread: bool = False,
+           limit: int = Query(default=200, ge=1, le=500)):
     return database.list_watch_events(kind=kind, only_unread=unread, limit=limit)
 
 

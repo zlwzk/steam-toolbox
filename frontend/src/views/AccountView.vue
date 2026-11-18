@@ -34,7 +34,8 @@ const testing = ref(false)
 const saving = ref(false)
 const loggingIn = ref(false)
 let loginTimer = null
-const STEAMID_RE = /^\d{16,18}$/
+// 与后端 _STEAMID_RE 共用同一语义：SteamID64 为 17 位纯数字
+const STEAMID_RE = /^\d{17}$/
 
 const LOGIN_STATE_LABEL = {
   idle: '未打开',
@@ -128,9 +129,9 @@ async function test() {
     const payload = { api_key: form.value.api_key, steamid: form.value.steamid, lang: form.value.lang }
     const r = await api.testAccount(payload)
     if (r.ok) {
+      // 测试连接只回填未保存表单的展示值，不写入数据库、不刷新已保存状态
       form.value.cc = r.cc || form.value.cc
       ok(`连接成功，库内 ${r.owned_count} 个本体`)
-      await refreshStatus()
     } else err('连接失败：' + (r.error || '未知原因'))
   } catch (e) {
     err('连接失败：' + errText(e))

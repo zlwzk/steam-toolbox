@@ -185,6 +185,12 @@ def _worker(rule: dict) -> None:
     delisted_policy = rule.get("delisted", "exclude")   # keep / exclude / only
     include_paid = bool(rule.get("include_paid", False))
 
+    # 下架判定当前没有可核验的数据来源：详情缺失 ≠ 已下架，价格缺失 ≠ 免费。
+    # 因此 delisted 条件不参与实际筛选（exclude 为无效条件、only 不会产生候选），
+    # 这里显式记录，避免用户误以为该条件已经生效。
+    if delisted_policy in ("exclude", "only"):
+        logstore.add("INFO", "下架 / 绝版判定暂不可用：无可核验数据来源，本次筛选未按该条件排除或保留任何条目")
+
     counts = {"candidate": 0, "kept": 0}
     _update(stage="写入结果", current=total, total=total, message="正在按规则筛选…")
 
@@ -206,13 +212,12 @@ def _worker(rule: dict) -> None:
                 status, reason = "kept", "价格未知，默认保护账号中的游戏"
             elif meta["paid"] and not include_paid:
                 status, reason = "kept", "付费购入，默认排除（防误删）"
-            elif delisted_policy == "only" and not meta["delisted"]:
-                status, reason = "kept", "未能确认游戏已下架，按规则排除"
+            elif delisted_policy == "only":
+                # 无任何条目可被确认为「已下架」：only 模式下不产生候选，
+                # 理由明确写为「暂不可判定」而不是暗示已按条件筛选。
+                status, reason = "kept", "下架状态暂不可判定，无法确认已下架，按规则排除"
             elif meta["delisted"] and delisted_policy == "exclude":
                 status, reason = "kept", "已下架/绝版，按规则排除"
-            elif meta["delisted"] and delisted_policy == "only":
-                hit, why = _time_match(playtime, rule)
-                status, reason = ("candidate", f"已下架；{why}") if hit else ("kept", f"未命中时长规则（{why}）")
             else:
                 hit, why = _time_match(playtime, rule)
                 if hit:

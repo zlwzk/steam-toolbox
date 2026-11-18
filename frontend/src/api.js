@@ -1,38 +1,116 @@
 const BASE = '/api'
 
+// 默认超时（毫秒）：本地服务响应慢时给出明确提示，避免界面无限转圈
+const DEFAULT_TIMEOUT_MS = 30000
+// 仅安全读取方法允许有限自动重试；POST/PUT/DELETE 默认不重试，避免重复创建任务或重复执行外部操作
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
+const MAX_SAFE_RETRIES = 2
+// 安全读取请求在这些情况下才重试：网络错误/超时，或 429/5xx 服务端瞬时错误
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504])
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function req(path, opts = {}, retries = 1) {
-  let resp
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      resp = await fetch(BASE + path, {
-        headers: { 'Content-Type': 'application/json' },
-        ...opts,
-      })
-      break
-    } catch (e) {
-      // 本地后端未就绪（启动竞态）或端口被占用：有限重试，仍失败再给出明确中文提示
-      if (attempt < retries) {
-        await delay(500 * (attempt + 1))
-        continue
-      }
-      throw new Error('无法连接本地服务：后端尚未就绪或端口被占用，请关闭软件后重新打开')
-    }
+function methodOf(opts) {
+  return String((opts && opts.method) || 'GET').toUpperCase()
+}
+
+/** 带超时的 fetch；超时通过 AbortController 中断 */
+async function fetchWithTimeout(path, opts, timeoutMs) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(BASE + path, {
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      ...opts,
+    })
+  } finally {
+    clearTimeout(timer)
   }
-  if (!resp.ok) {
-    const body = await resp.text()
-    let error = body || `请求失败 ${resp.status}`
+}
+
+/** 把错误响应体归一化为可读中文文案：兼容 FastAPI 字符串 detail、422 校验错误数组、空响应与非 JSON 内容 */
+async function extractError(resp) {
+  let body = ''
+  try {
+    body = await resp.text()
+  } catch { /* 响应体读取失败时按状态码兜底 */ }
+  if (body) {
     try {
       const parsed = JSON.parse(body)
-      if (typeof parsed.detail === "string") error = parsed.detail
-      else if (typeof parsed.error === "string") error = parsed.error
+      if (typeof parsed.detail === 'string') return parsed.detail
+      if (Array.isArray(parsed.detail)) {
+        const msgs = parsed.detail
+          .map((d) => {
+            const loc = d && Array.isArray(d.loc) ? d.loc.filter((x) => x !== 'body').join('.') : ''
+            const m = (d && d.msg) || (typeof d === 'string' ? d : '')
+            return [loc, m].filter(Boolean).join(' ')
+          })
+          .filter(Boolean)
+        if (msgs.length) return msgs.join('；')
+      }
+      if (typeof parsed.error === 'string') return parsed.error
+      if (typeof parsed.message === 'string') return parsed.message
     } catch { /* non-JSON server error */ }
-    throw new Error(error)
+    const oneLine = body.replace(/\s+/g, ' ').trim()
+    if (oneLine) return oneLine.length > 200 ? `${oneLine.slice(0, 200)}…` : oneLine
   }
-  return resp.json()
+  return `请求失败 ${resp.status}`
+}
+
+function httpError(resp, message) {
+  const err = new Error(message)
+  err.status = resp.status
+  return err
+}
+
+function isAbortError(e) {
+  return e && (e.name === 'AbortError' || /aborted/i.test(String(e.message || '')))
+}
+
+/**
+ * 统一请求入口。
+ * - 只对安全读取方法（GET/HEAD/OPTIONS）做有限重试；写操作方法不自动重试。
+ * - 超时、连接失败、可读错误文案归一化。
+ */
+export async function req(path, opts = {}) {
+  const method = methodOf(opts)
+  const safe = SAFE_METHODS.has(method)
+  const maxAttempts = safe ? 1 + MAX_SAFE_RETRIES : 1
+  let lastErr = null
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const resp = await fetchWithTimeout(path, opts, DEFAULT_TIMEOUT_MS)
+      if (!resp.ok) throw httpError(resp, await extractError(resp))
+      if (resp.status === 204) return null
+      const text = await resp.text()
+      if (!text) return null
+      try {
+        return JSON.parse(text)
+      } catch {
+        throw new Error('服务返回了无法解析的内容，请查看运行日志')
+      }
+    } catch (e) {
+      lastErr = e
+      const canRetry = safe && attempt < maxAttempts - 1
+      if (!canRetry) break
+      // 网络错误/超时（无 status）或 429/5xx 才重试；4xx 响应错误不重试
+      const transient = e.status === undefined || RETRYABLE_STATUS.has(e.status)
+      if (!transient) break
+      await delay(500 * (attempt + 1))
+    }
+  }
+
+  if (lastErr && lastErr.status === undefined) {
+    if (isAbortError(lastErr)) {
+      throw new Error('请求超时：本地服务响应过慢，请稍后重试或查看运行日志')
+    }
+    throw new Error('无法连接本地服务：后端尚未就绪或端口被占用，请关闭软件后重新打开')
+  }
+  throw lastErr || new Error('请求失败')
 }
 
 function qs(params) {
