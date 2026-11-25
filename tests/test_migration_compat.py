@@ -63,3 +63,39 @@ def test_new_db_init_idempotent(tmp_path, monkeypatch):
                       "claim_queue", "settings", "scan_cache", "workshop_items", "cleaner_items",
                       "watch_games", "watch_mods", "watch_rules", "watch_events"):
             assert table in names
+
+
+def test_migration_adds_wishlist_and_cdk_tables(tmp_path, monkeypatch):
+    """1.3.x 旧库升级：init_db 自动补建 wishlist_games / cdk_keys，既有数据不动。"""
+    db_path = tmp_path / "legacy13.db"
+    _make_old_db(db_path)
+    monkeypatch.setattr(config, "DB_PATH", db_path)
+    database.init_db()
+    with database.get_conn() as conn:
+        names = {r["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        assert "wishlist_games" in names and "cdk_keys" in names
+        # 既有数据完整
+        assert conn.execute("SELECT COUNT(*) FROM owned_games").fetchone()[0] == 1
+        # 新表可用且幂等
+    database.init_db()  # 重复执行不抛错
+    database.upsert_wishlist_game(730, "730", "exact", "direct_appid", "CS2", "反恐精英 2")
+    assert len(database.list_wishlist_games()) == 1
+
+
+def test_migration_adds_wishlist_and_cdk_tables(tmp_path, monkeypatch):
+    """1.3.x 旧库升级：init_db 自动补建 wishlist_games / cdk_keys，既有数据不动。"""
+    db_path = tmp_path / "legacy13.db"
+    _make_old_db(db_path)
+    monkeypatch.setattr(config, "DB_PATH", db_path)
+    database.init_db()
+    with database.get_conn() as conn:
+        names = {r["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        assert "wishlist_games" in names and "cdk_keys" in names
+        # 既有数据完整
+        assert conn.execute("SELECT COUNT(*) FROM owned_games").fetchone()[0] == 1
+        # 新表可用且幂等
+    database.init_db()  # 重复执行不抛错
+    database.upsert_wishlist_game(730, "730", "exact", "direct_appid", "CS2", "反恐精英 2")
+    assert len(database.list_wishlist_games()) == 1

@@ -202,6 +202,22 @@ export const api = {
   proStatus: () => req('/pro/status'),
   proUnlock: () => req('/pro/unlock', { method: 'POST' }),
 
+  // 游戏入库登记（名称/AppID 解析 + 中英文补全）
+  wlResolve: (data) => req('/wishlist/resolve', { method: 'POST', body: JSON.stringify(data) }),
+  wlSave: (data) => req('/wishlist/save', { method: 'POST', body: JSON.stringify(data) }),
+  wlList: () => req('/wishlist/list'),
+  wlRemove: (inputText) => req(`/wishlist/item?input_text=${encodeURIComponent(inputText)}`, { method: 'DELETE' }),
+  wlClear: () => req('/wishlist/clear', { method: 'POST' }),
+
+  // CDK 激活码登记（本地登记 + 人工激活辅助；不自动提交）
+  cdkAdd: (data) => req('/cdk/add', { method: 'POST', body: JSON.stringify(data) }),
+  cdkList: (status = '') => req(`/cdk/list${qs({ status })}`),
+  cdkConfirm: (data) => req('/cdk/confirm', { method: 'POST', body: JSON.stringify(data) }),
+  cdkMark: (data) => req('/cdk/status', { method: 'POST', body: JSON.stringify(data) }),
+  cdkRemove: (id) => req(`/cdk/${id}`, { method: 'DELETE' }),
+  cdkReveal: (id) => req(`/cdk/reveal/${id}`),
+  cdkInfo: () => req('/cdk/activate-info'),
+
   // 库自动分类（完整版）
   colStatus: () => req('/collections/status'),
   colPlan: (data) => req('/collections/plan', { method: 'POST', body: JSON.stringify(data) }),

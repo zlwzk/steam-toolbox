@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config, database, logstore, monitor, scheduler, scanner, updater
 from .security import add_security_headers, reject_unsafe_request
-from .routers import account, candidates, claim, cleaner, collections, freegames, monitor as monitor_router, pro, scan, session, settings, workshop
+from .routers import account, candidates, claim, cleaner, cdk, collections, freegames, monitor as monitor_router, pro, scan, session, settings, workshop, wishlist
 
 
 @asynccontextmanager
@@ -120,6 +120,8 @@ app.include_router(cleaner.router)
 app.include_router(collections.router)
 app.include_router(settings.router)
 app.include_router(monitor_router.router)
+app.include_router(wishlist.router)
+app.include_router(cdk.router)
 app.include_router(pro.router)
 
 _dist = config.RESOURCE_DIR / "frontend" / "dist"
